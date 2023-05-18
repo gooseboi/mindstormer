@@ -1,6 +1,11 @@
-use anyhow::{bail, Context};
+use anyhow::Context;
+use quick_xml::{
+    events::{BytesDecl, Event},
+    reader::Reader,
+};
 use std::fs::File;
 use std::io::Read;
+use std::str;
 
 struct EV3Project {
     title: String,
@@ -19,13 +24,35 @@ struct EV3Project {
 }
 
 struct EV3File {
+    decl: BytesDecl<'static>,
     name: String,
     contents: Vec<u8>,
 }
 
 impl EV3File {
     fn new(name: &str, contents: Vec<u8>) -> anyhow::Result<Self> {
-        println!("Contents: {}", String::from_utf8(contents)?);
+        let mut xml = Reader::from_reader(contents.as_slice());
+        xml.trim_text(true);
+        let mut decl = None;
+        loop {
+            match xml.read_event().context("File had invalid xml")? {
+                Event::Start(t) => {
+                    println!("Start tag: name {}", str::from_utf8(t.name().0).unwrap())
+                }
+                Event::End(t) => println!("End tag: name {}", str::from_utf8(t.name().0).unwrap()),
+                Event::Empty(t) => {
+                    println!("Empty tag: name {}", str::from_utf8(t.name().0).unwrap())
+                }
+                Event::Text(_) => println!("Found Text"),
+                Event::Comment(_) => println!("Ignoring Comment"),
+                Event::CData(_) => println!("Found CData"),
+                Event::Decl(d) => decl = Some(d),
+                Event::PI(_) => println!("Found Processing"),
+                Event::DocType(_) => println!("Found DocType"),
+                Event::Eof => break,
+            }
+        }
+        let decl = decl.context("Should have a decl")?;
         todo!()
     }
 }
@@ -81,7 +108,7 @@ fn get_project_from_zip(filename: &str) -> anyhow::Result<EV3Project> {
 
             _ => {
                 let name = name.as_str();
-                EV3File::new(name, bytes);
+                files.push(EV3File::new(name, bytes).context("Failed parsing")?);
             }
         }
     }
