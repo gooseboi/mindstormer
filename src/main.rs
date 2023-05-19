@@ -197,6 +197,6 @@ fn get_project_from_zip(filename: &str) -> anyhow::Result<EV3Project> {
 }
 
 fn main() -> anyhow::Result<()> {
-    get_project_from_zip("test.ev3")?;
+    get_project_from_zip("1block.ev3")?;
     Ok(())
 }
