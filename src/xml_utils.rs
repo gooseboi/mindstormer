@@ -17,6 +17,7 @@ pub fn extract_name_from_qname(qname: QName) -> anyhow::Result<(String, Option<S
     Ok((name, prefix))
 }
 
+#[derive(Debug)]
 pub struct ParsedAttribute {
     pub key: (String, Option<String>),
     pub value: String,

@@ -124,14 +124,26 @@ impl EV3FileBuilder {
     ) -> anyhow::Result<()> {
         match name.as_str() {
             "SourceFile" => {
-                bail!("Cannot yet parse SourceFile")
+                let _ = prefix;
+                for attr in attributes {
+                    if attr.key.0 == "Version" {
+                        self.version(attr.value);
+                    } else if {
+                        println!("TODO: Properly handle SourceFile attributes");
+                    }
+                }
             }
             _ => bail!("{name} start tag not implemented"),
         }
+        Ok(())
     }
 
     fn name(&mut self, name: String) {
         self.name = Some(name);
+    }
+
+    fn version(&mut self, version: String) {
+        self.version = Some(version);
     }
 
     fn build(self) -> anyhow::Result<EV3File> {
