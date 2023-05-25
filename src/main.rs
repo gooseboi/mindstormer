@@ -1,4 +1,4 @@
-use anyhow::Context;
+use anyhow::{bail, Context};
 use quick_xml::{
     events::{BytesDecl, Event},
     reader::Reader,
@@ -11,7 +11,7 @@ mod utils;
 mod xml_utils;
 
 use utils::VecReadWrapper;
-use xml_utils::parse_attributes;
+use xml_utils::{extract_name_from_qname, parse_attributes, ParsedAttribute};
 type XMLReader = Reader<VecReadWrapper>;
 
 struct EV3Project {
@@ -34,46 +34,92 @@ struct EV3File {
     decl: BytesDecl<'static>,
     version: String,
     name: String,
-    contents: Vec<u8>,
 }
 
 impl EV3File {
     fn new(name: &str, contents: Vec<u8>) -> anyhow::Result<Self> {
-        let mut xml = Reader::from_reader(contents.as_slice());
-        xml.trim_text(true);
-        let mut decl = None;
+        let wrapper = VecReadWrapper::new(contents);
+        let xml = Reader::from_reader(wrapper);
+        let mut builder = EV3FileBuilder::from_xml(xml);
+        builder.parse().context("Failed parsing file contents")?;
+        builder.build().context("Failed building file struct")
+    }
+}
+
+struct EV3FileBuilder {
+    decl: Option<BytesDecl<'static>>,
+    version: Option<String>,
+    name: Option<String>,
+    xml: XMLReader,
+}
+
+impl EV3FileBuilder {
+    fn from_xml(xml: XMLReader) -> Self {
+        let name = Default::default();
+        let version = Default::default();
+        let decl = Default::default();
+        Self {
+            xml,
+            name,
+            version,
+            decl,
+        }
+    }
+
+    fn parse(&mut self) -> anyhow::Result<()> {
         loop {
-            match xml.read_event().context("File had invalid xml")? {
+            let mut buf = vec![];
+            match self
+                .xml
+                .read_event_into(&mut buf)
+                .context("File had invalid xml")?
+            {
                 Event::Start(t) => {
-                    let (name, prefix) = t.name().decompose();
-                    let name = String::from_utf8(name.into_inner().iter().cloned().collect())
-                        .context(format!("Invalid UTF-8 tag name {:?}", name))?;
-                    if let Some(_) = prefix {
-                        println!("TODO: Start with prefix!");
-                    } else {
-                        match name.as_str() {
-                            "SourceFile" => {
-                                let attributes =
-                                    parse_attributes(&t).context("Failed parsing attributes")?;
-                                for attribute in attributes {}
-                            }
-                            _ => println!("TODO: start tag {name}"),
-                        }
-                    }
+                    let qname = t.name();
+                    let (name, prefix) =
+                        extract_name_from_qname(qname).context("Failed parsing start tag name")?;
+                    let attributes =
+                        parse_attributes(&t).context("Failed parsing start tag attributes")?;
+
+                    let _ = self.parse_start_tag(name, prefix, attributes)?;
                 }
                 Event::End(_) => println!("TODO: End tag"),
-                Event::Empty(t) => println!("TODO: Empty tag"),
+                Event::Empty(_) => println!("TODO: Empty tag"),
                 Event::Text(_) => println!("TODO: Text tag"),
                 Event::Comment(_) => println!("Ignoring Comment"),
                 Event::CData(_) => println!("Found CData"),
-                Event::Decl(d) => decl = Some(d),
+                Event::Decl(d) => self.decl = Some(d.into_owned()),
                 Event::PI(_) => println!("Found Processing"),
                 Event::DocType(_) => println!("Found DocType"),
-                Event::Eof => break,
+                Event::Eof => {}
             }
         }
-        let _decl = decl.context("Should have a decl")?;
-        todo!()
+        Ok(())
+    }
+
+    fn parse_start_tag(
+        &mut self,
+        name: String,
+        prefix: Option<String>,
+        attributes: Vec<ParsedAttribute>,
+    ) -> anyhow::Result<()> {
+        match name.as_str() {
+            "SourceFile" => {
+                bail!("Cannot yet parse SourceFile")
+            }
+            _ => bail!("{name} start tag not implemented"),
+        }
+    }
+
+    fn build(self) -> anyhow::Result<EV3File> {
+        let name = self.name.context("No name found")?;
+        let version = self.version.context("No version found")?;
+        let decl = self.decl.context("No decl found")?;
+        Ok(EV3File {
+            name,
+            version,
+            decl,
+        })
     }
 }
 
@@ -128,7 +174,7 @@ fn get_project_from_zip(filename: &str) -> anyhow::Result<EV3Project> {
 
             _ => {
                 let name = name.as_str();
-                files.push(EV3File::new(name, bytes).context("Failed parsing")?);
+                files.push(EV3File::new(name, bytes).context(format!("Failed parsing {name}"))?);
             }
         }
     }
