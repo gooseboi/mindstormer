@@ -110,7 +110,7 @@ impl EV3FileBuilder {
                 Event::Decl(d) => self.decl = Some(d.into_owned()),
                 Event::PI(_) => println!("Found Processing"),
                 Event::DocType(_) => println!("Found DocType"),
-                Event::Eof => {}
+                Event::Eof => break,
             }
         }
         Ok(())
