@@ -7,9 +7,12 @@ use std::fs::File;
 use std::io::Read;
 use std::str;
 
+mod utils;
 mod xml_utils;
 
+use utils::VecReadWrapper;
 use xml_utils::parse_attributes;
+type XMLReader = Reader<VecReadWrapper>;
 
 struct EV3Project {
     title: String,
