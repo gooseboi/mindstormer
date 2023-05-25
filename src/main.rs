@@ -26,8 +26,26 @@ struct EV3Project {
     activity_assets: Vec<u8>,
     /// I assume there's no need to parse this, we don't change it
     project: String,
-
     files: Vec<EV3File>,
+}
+
+impl EV3Project {
+    fn output_file(&self, fname: &str) -> anyhow::Result<()> {
+        let _ = fname;
+        let _ = &self.title;
+        let _ = &self.description;
+        let _ = &self.year;
+        let _ = &self.thumbnail;
+        let _ = &self.activity;
+        let _ = &self.activity_assets;
+        let _ = &self.project;
+        for f in &self.files {
+            let _ = &f.decl;
+            let _ = &f.version;
+            let _ = &f.name;
+        }
+        bail!("Outputting the project not yet implemented")
+    }
 }
 
 struct EV3File {
@@ -41,6 +59,7 @@ impl EV3File {
         let wrapper = VecReadWrapper::new(contents);
         let xml = Reader::from_reader(wrapper);
         let mut builder = EV3FileBuilder::from_xml(xml);
+        builder.name(name.into());
         builder.parse().context("Failed parsing file contents")?;
         builder.build().context("Failed building file struct")
     }
@@ -109,6 +128,10 @@ impl EV3FileBuilder {
             }
             _ => bail!("{name} start tag not implemented"),
         }
+    }
+
+    fn name(&mut self, name: String) {
+        self.name = Some(name);
     }
 
     fn build(self) -> anyhow::Result<EV3File> {
@@ -202,6 +225,7 @@ fn get_project_from_zip(filename: &str) -> anyhow::Result<EV3Project> {
 }
 
 fn main() -> anyhow::Result<()> {
-    get_project_from_zip("1block.ev3")?;
+    let project = get_project_from_zip("1block.ev3")?;
+    project.output_file("out.ev3")?;
     Ok(())
 }
