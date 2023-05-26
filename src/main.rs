@@ -108,7 +108,7 @@ impl EV3FileBuilder {
                     let attributes =
                         parse_attributes(&t).context("Failed parsing start tag attributes")?;
 
-                    let _ = self.parse_start_tag(name, prefix, attributes)?;
+                    self.parse_start_tag(name, prefix, attributes)?;
                 }
                 Event::End(_) => println!("TODO: End tag"),
                 Event::Empty(_) => println!("TODO: Empty tag"),
@@ -137,7 +137,7 @@ impl EV3FileBuilder {
         match name.as_str() {
             "SourceFile" => {
                 if prefix.is_some() {
-                    bail!("Unexpected prefix namespace in SourceFile start tag");
+                    bail!("Unexpected prefix namespace in `SourceFile` start tag");
                 }
                 let mut number = None;
                 let mut namespace = None;
