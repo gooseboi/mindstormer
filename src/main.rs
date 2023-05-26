@@ -67,7 +67,7 @@ impl EV3File {
         let mut xml = Reader::from_reader(wrapper);
         xml.trim_text(true);
         let mut builder = EV3FileBuilder::from_xml(xml);
-        builder.name(name.into());
+        builder.name(name.into())?;
         builder.parse().context("Failed parsing file contents")?;
         builder.build().context("Failed building file struct")
     }
@@ -150,19 +150,37 @@ impl EV3FileBuilder {
                 }
                 let number = number.context("Missing source file version number")?;
                 let namespace = namespace.context("Missing source file namespace")?;
-                self.version(Version { number, namespace });
+                self.version(Version { number, namespace })?;
+            }
+            "Namespace" => {
+                if prefix.is_some() {
+                    bail!("Unexpected prefix namespace in `Namespace` start tag");
+                }
+                for attr in attributes {
+                    if attr.key.0 == "Name" && attr.value != "Project" {
+                        bail!("Unsupported namespace {} that is not project", attr.value);
+                    }
+                }
             }
             _ => bail!("{name} start tag not implemented"),
         }
         Ok(())
     }
 
-    fn name(&mut self, name: String) {
+    fn name(&mut self, name: String) -> anyhow::Result<()> {
+        if self.name.is_some() {
+            bail!("Setting builder name twice");
+        }
         self.name = Some(name);
+        Ok(())
     }
 
-    fn version(&mut self, version: Version) {
+    fn version(&mut self, version: Version) -> anyhow::Result<()>{
+        if self.version.is_some() {
+            bail!("Setting builder version twice");
+        }
         self.version = Some(version);
+        Ok(())
     }
 
     fn build(self) -> anyhow::Result<EV3File> {
