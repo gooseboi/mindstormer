@@ -136,7 +136,9 @@ impl EV3FileBuilder {
     ) -> anyhow::Result<()> {
         match name.as_str() {
             "SourceFile" => {
-                let _ = prefix;
+                if prefix.is_some() {
+                    bail!("Unexpected prefix namespace in SourceFile start tag");
+                }
                 let mut number = None;
                 let mut namespace = None;
                 for attr in attributes {
