@@ -128,7 +128,7 @@ impl EV3FileBuilder {
                 for attr in attributes {
                     if attr.key.0 == "Version" {
                         self.version(attr.value);
-                    } else if {
+                    } else {
                         println!("TODO: Properly handle SourceFile attributes");
                     }
                 }
