@@ -64,7 +64,8 @@ struct EV3File {
 impl EV3File {
     fn new(name: &str, contents: Vec<u8>) -> anyhow::Result<Self> {
         let wrapper = VecReadWrapper::new(contents);
-        let xml = Reader::from_reader(wrapper);
+        let mut xml = Reader::from_reader(wrapper);
+        xml.trim_text(true);
         let mut builder = EV3FileBuilder::from_xml(xml);
         builder.name(name.into());
         builder.parse().context("Failed parsing file contents")?;
@@ -111,7 +112,11 @@ impl EV3FileBuilder {
                 }
                 Event::End(_) => println!("TODO: End tag"),
                 Event::Empty(_) => println!("TODO: Empty tag"),
-                Event::Text(_) => println!("TODO: Text tag"),
+                Event::Text(t) => {
+                    let s = t.into_inner().to_mut().iter().cloned().collect();
+                    let s = String::from_utf8(s).unwrap();
+                    println!("TODO: Text tag: {}", s);
+                }
                 Event::Comment(_) => println!("Ignoring Comment"),
                 Event::CData(_) => println!("Found CData"),
                 Event::Decl(d) => self.decl = Some(d.into_owned()),
