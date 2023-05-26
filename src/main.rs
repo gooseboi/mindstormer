@@ -41,16 +41,23 @@ impl EV3Project {
         let _ = &self.project;
         for f in &self.files {
             let _ = &f.decl;
-            let _ = &f.version;
+            let _ = &f.version.number;
+            let _ = &f.version.namespace;
             let _ = &f.name;
         }
         bail!("Outputting the project not yet implemented")
     }
 }
 
+#[derive(Default)]
+struct Version {
+    number: String,
+    namespace: String,
+}
+
 struct EV3File {
     decl: BytesDecl<'static>,
-    version: String,
+    version: Version,
     name: String,
 }
 
@@ -67,7 +74,7 @@ impl EV3File {
 
 struct EV3FileBuilder {
     decl: Option<BytesDecl<'static>>,
-    version: Option<String>,
+    version: Option<Version>,
     name: Option<String>,
     xml: XMLReader,
 }
@@ -125,13 +132,18 @@ impl EV3FileBuilder {
         match name.as_str() {
             "SourceFile" => {
                 let _ = prefix;
+                let mut number = None;
+                let mut namespace = None;
                 for attr in attributes {
-                    if attr.key.0 == "Version" {
-                        self.version(attr.value);
-                    } else {
-                        println!("TODO: Properly handle SourceFile attributes");
+                    match attr.key.0.as_str() {
+                        "Version" => number = Some(attr.value),
+                        "xmlns" => namespace = Some(attr.value),
+                        _ => bail!("Unknown SourceFile attribute: {}", attr.key.0),
                     }
                 }
+                let number = number.context("Missing source file version number")?;
+                let namespace = namespace.context("Missing source file namespace")?;
+                self.version(Version { number, namespace });
             }
             _ => bail!("{name} start tag not implemented"),
         }
@@ -142,7 +154,7 @@ impl EV3FileBuilder {
         self.name = Some(name);
     }
 
-    fn version(&mut self, version: String) {
+    fn version(&mut self, version: Version) {
         self.version = Some(version);
     }
 
