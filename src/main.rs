@@ -149,7 +149,7 @@ impl EV3FileBuilder {
                 }
                 Event::Comment(_) => println!("Ignoring Comment"),
                 Event::CData(_) => println!("Found CData"),
-                Event::Decl(d) => self.decl = Some(d.into_owned()),
+                Event::Decl(d) => self.decl(d.into_owned())?,
                 Event::PI(_) => println!("Found Processing"),
                 Event::DocType(_) => println!("Found DocType"),
                 Event::Eof => break,
@@ -262,6 +262,14 @@ impl EV3FileBuilder {
             bail!("Setting builder version twice");
         }
         self.version = Some(version);
+        Ok(())
+    }
+
+    fn decl(&mut self, decl: BytesDecl<'static>) -> anyhow::Result<()> {
+        if self.decl.is_some() {
+            bail!("Setting builder version twice");
+        }
+        self.decl = Some(decl);
         Ok(())
     }
 
