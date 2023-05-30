@@ -6,6 +6,8 @@ use quick_xml::{
 use std::fs::File;
 use std::io::Read;
 use std::str;
+use std::rc::Rc;
+use std::cell::RefCell;
 
 mod utils;
 mod xml_utils;
@@ -60,6 +62,7 @@ impl EV3Project {
             let _ = &f.version.number;
             let _ = &f.version.namespace;
             let _ = &f.name;
+            let _ = &f.root;
         }
         bail!("Outputting the project not yet implemented")
     }
@@ -75,6 +78,7 @@ struct EV3File {
     decl: BytesDecl<'static>,
     version: Version,
     name: String,
+    root: EV3Block,
 }
 
 impl EV3File {
@@ -94,6 +98,19 @@ struct EV3FileBuilder {
     version: Option<Version>,
     name: Option<String>,
     xml: XMLReader,
+    root: Option<EV3Block>,
+}
+
+enum EV3BlockType {
+    Start,
+}
+
+struct EV3Block {
+    ty: EV3BlockType,
+    id: String,
+    bounds:( usize, usize),
+    // TODO: Should this be children?
+    child: Option<Rc<RefCell<EV3Block>>>,
 }
 
 impl EV3FileBuilder {
@@ -101,11 +118,13 @@ impl EV3FileBuilder {
         let name = Default::default();
         let version = Default::default();
         let decl = Default::default();
+        let root = Default::default();
         Self {
             xml,
             name,
             version,
             decl,
+            root,
         }
     }
 
@@ -211,7 +230,31 @@ impl EV3FileBuilder {
                 if prefix.is_some() {
                     bail!("Unexpected prefix namespace in `StartBlock` start tag");
                 }
-                println!("{attributes:?}");
+                let mut id = None;
+                let mut width = None;
+                let mut height = None;
+                for attr in attributes {
+                    match attr.key.0.as_str() {
+                        "Id" => id = Some(attr.value),
+                        // Ignore, because we already know it's a lstart block
+                        "Target" => {}
+                        "Bounds" => {
+                            let (w, h) = parse_bounds(attr.value).context("Failed parsing bounds for `StartBlock`")?;
+                            width = Some(w);
+                            height = Some(h);
+                        }
+                        _ => bail!("Unknown attribute for `{name}`: {}", attr.value),
+                    }
+                }
+                let id = id.context("Missing id for StartBlock")?;
+                let width = width.context("Missing width for StartBlock")?;
+                let height = height.context("Missing height for StartBlock")?;
+                self.root = Some(EV3Block {
+                    ty: EV3BlockType::Start,
+                    id,
+                    bounds: (width, height),
+                    child: None,
+                });
             }
             _ => {
                 dump_tag(name.clone(), prefix, attributes);
@@ -277,12 +320,30 @@ impl EV3FileBuilder {
         let name = self.name.context("No name found")?;
         let version = self.version.context("No version found")?;
         let decl = self.decl.context("No decl found")?;
+        let root = self.root.context("No root found")?;
         Ok(EV3File {
             name,
             version,
             decl,
+            root,
         })
     }
+}
+
+fn parse_bounds(input: String) -> anyhow::Result<(usize, usize)> {
+    let vals: anyhow::Result<Vec<usize>> = input
+        .split(' ')
+        .map(|n| n.parse().context("Invalid number in bounds"))
+        .collect();
+    let vals = vals?;
+    if vals.len() > 4 {
+        bail!("Too many bounds");
+    } else if vals.len() < 4 {
+        bail!("Too little bounds");
+    }
+    let width = vals[2];
+    let height = vals[3];
+    Ok((width, height))
 }
 
 fn get_project_from_zip(filename: &str) -> anyhow::Result<EV3Project> {
