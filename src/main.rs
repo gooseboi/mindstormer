@@ -14,6 +14,22 @@ use utils::VecReadWrapper;
 use xml_utils::{extract_name_from_qname, parse_attributes, ParsedAttribute};
 type XMLReader = Reader<VecReadWrapper>;
 
+#[allow(unused)]
+fn dump_tag(name: String, prefix: Option<String>, attributes: Vec<ParsedAttribute>) {
+    println!("Dumping tag");
+    println!("Name: {name}");
+    println!("Prefix: {prefix:?}");
+    match attributes.len() {
+        0 => println!("    No attributes"),
+        n => {
+            for attr in attributes {
+                println!("    Attr: {attr:?}");
+            }
+        }
+    }
+    println!("");
+}
+
 struct EV3Project {
     title: String,
     description: String,
@@ -110,8 +126,22 @@ impl EV3FileBuilder {
 
                     self.parse_start_tag(name, prefix, attributes)?;
                 }
-                Event::End(_) => println!("TODO: End tag"),
-                Event::Empty(_) => println!("TODO: Empty tag"),
+                Event::End(t) => {
+                    let qname = t.name();
+                    let (name, prefix) =
+                        extract_name_from_qname(qname).context("Failed parsing end tag name")?;
+
+                    self.parse_end_tag(name, prefix)?;
+                }
+                Event::Empty(t) => {
+                    let qname = t.name();
+                    let (name, prefix) =
+                        extract_name_from_qname(qname).context("Failed parsing start tag name")?;
+                    let attributes =
+                        parse_attributes(&t).context("Failed parsing start tag attributes")?;
+
+                    self.parse_empty_tag(name, prefix, attributes)?;
+                }
                 Event::Text(t) => {
                     let s = t.into_inner().to_mut().iter().cloned().collect();
                     let s = String::from_utf8(s).unwrap();
@@ -162,7 +192,59 @@ impl EV3FileBuilder {
                     }
                 }
             }
-            _ => bail!("{name} start tag not implemented"),
+            // TODO: Should this do something?
+            "VirtualInstrument" => {}
+            // TODO: Should this do something?
+            "FrontPanel" => {}
+            "BlockDiagram" => {
+                for attr in attributes {
+                    if attr.key.0 == "Name" && attr.value != "__RootDiagram__" {
+                        bail!("Unknown block diagram name value {}", attr.value);
+                    }
+
+                    if attr.key.0 != "Name" {
+                        bail!("Unknown block diagram name {}", attr.key.0);
+                    }
+                }
+            }
+            "StartBlock" => {
+                if prefix.is_some() {
+                    bail!("Unexpected prefix namespace in `StartBlock` start tag");
+                }
+                println!("{attributes:?}");
+            }
+            _ => {
+                dump_tag(name.clone(), prefix, attributes);
+                bail!("{name} start tag not implemented");
+            }
+        }
+        Ok(())
+    }
+
+    fn parse_end_tag(&mut self, name: String, prefix: Option<String>) -> anyhow::Result<()> {
+        if prefix.is_some() {
+            bail!("Prefix present in {name} end tag");
+        }
+        match name.as_str() {
+            // Same as line 186
+            "FrontPanel" => {}
+            _ => bail!("{name} end tag not implemented"),
+        }
+        Ok(())
+    }
+
+    fn parse_empty_tag(
+        &mut self,
+        name: String,
+        prefix: Option<String>,
+        attributes: Vec<ParsedAttribute>,
+    ) -> anyhow::Result<()> {
+        let _ = prefix;
+        let _ = attributes;
+        match name.as_str() {
+            // TODO: Should this do something?
+            "FrontPanelCanvas" => {}
+            _ => bail!("{name} empty tag not implemented"),
         }
         Ok(())
     }
@@ -175,7 +257,7 @@ impl EV3FileBuilder {
         Ok(())
     }
 
-    fn version(&mut self, version: Version) -> anyhow::Result<()>{
+    fn version(&mut self, version: Version) -> anyhow::Result<()> {
         if self.version.is_some() {
             bail!("Setting builder version twice");
         }
