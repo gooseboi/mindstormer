@@ -1,13 +1,13 @@
-use anyhow::{bail, Context};
+use anyhow::{bail, ensure, Context};
 use quick_xml::{
     events::{BytesDecl, Event},
     reader::Reader,
 };
+use std::cell::RefCell;
 use std::fs::File;
 use std::io::Read;
-use std::str;
 use std::rc::Rc;
-use std::cell::RefCell;
+use std::str;
 
 mod utils;
 mod xml_utils;
@@ -101,6 +101,16 @@ struct EV3FileBuilder {
     root: Option<EV3Block>,
 }
 
+enum SequenceBlockType {
+    In,
+    Out,
+}
+
+struct SequenceBlock {
+    ty: SequenceBlockType,
+    bounds: (usize, usize),
+}
+
 enum EV3BlockType {
     Start,
 }
@@ -108,9 +118,11 @@ enum EV3BlockType {
 struct EV3Block {
     ty: EV3BlockType,
     id: String,
-    bounds:( usize, usize),
+    bounds: (usize, usize),
     // TODO: Should this be children?
     child: Option<Rc<RefCell<EV3Block>>>,
+    sequence_in: Option<SequenceBlock>,
+    sequence_out: Option<SequenceBlock>,
 }
 
 impl EV3FileBuilder {
@@ -128,14 +140,18 @@ impl EV3FileBuilder {
         }
     }
 
+    fn read_xml_event(&mut self) -> anyhow::Result<Event<'static>> {
+        let mut buf = vec![];
+        let event = self
+            .xml
+            .read_event_into(&mut buf)
+            .context("File had invalid xml")?;
+        Ok(event.into_owned())
+    }
+
     fn parse(&mut self) -> anyhow::Result<()> {
         loop {
-            let mut buf = vec![];
-            match self
-                .xml
-                .read_event_into(&mut buf)
-                .context("File had invalid xml")?
-            {
+            match self.read_xml_event()? {
                 Event::Start(t) => {
                     let qname = t.name();
                     let (name, prefix) =
@@ -236,10 +252,11 @@ impl EV3FileBuilder {
                 for attr in attributes {
                     match attr.key.0.as_str() {
                         "Id" => id = Some(attr.value),
-                        // Ignore, because we already know it's a lstart block
+                        // Ignore, because we already know it's a start block
                         "Target" => {}
                         "Bounds" => {
-                            let (w, h) = parse_bounds(attr.value).context("Failed parsing bounds for `StartBlock`")?;
+                            let (w, h) = parse_bounds(attr.value)
+                                .context("Failed parsing bounds for `StartBlock`")?;
                             width = Some(w);
                             height = Some(h);
                         }
@@ -249,11 +266,35 @@ impl EV3FileBuilder {
                 let id = id.context("Missing id for StartBlock")?;
                 let width = width.context("Missing width for StartBlock")?;
                 let height = height.context("Missing height for StartBlock")?;
+
+                let event = self.read_xml_event()?;
+                let Event::Start(t) = event else {
+                    bail!("Expected start tag in StartBlock");
+                };
+                let qname = t.name();
+                let (name, prefix) = extract_name_from_qname(qname)
+                    .context("Failed parsing start tag name in StartBlock")?;
+                let attributes = parse_attributes(&t)
+                    .context("Failed parsing start tag attributes in StartBlock")?;
+                ensure!(
+                    attributes.len() == 0,
+                    "Unexpected attributes in StartBlock tag"
+                );
+                if let Some(prefix) = prefix {
+                    bail!("Unexpected prefix `{prefix}` in StartBlock tag");
+                }
+                ensure!(
+                    name == "ConfigurableMethodTerminal",
+                    "Unexpected tag name `{name}` in StartBlock tag"
+                );
+
                 self.root = Some(EV3Block {
                     ty: EV3BlockType::Start,
                     id,
                     bounds: (width, height),
                     child: None,
+                    sequence_in: None,
+                    sequence_out: bail!("sequence out unimplemented"),
                 });
             }
             _ => {
