@@ -201,8 +201,8 @@ impl EV3FileBuilder {
     ) -> anyhow::Result<()> {
         match name.as_str() {
             "SourceFile" => {
-                if prefix.is_some() {
-                    bail!("Unexpected prefix namespace in `SourceFile` start tag");
+                if let Some(prefix) = prefix {
+                    bail!("Unexpected prefix namespace {prefix} in `SourceFile` start tag");
                 }
                 let mut number = None;
                 let mut namespace = None;
@@ -218,8 +218,8 @@ impl EV3FileBuilder {
                 self.version(Version { number, namespace })?;
             }
             "Namespace" => {
-                if prefix.is_some() {
-                    bail!("Unexpected prefix namespace in `Namespace` start tag");
+                if let Some(prefix) = prefix {
+                    bail!("Unexpected prefix namespace {prefix} in `Namespace` start tag");
                 }
                 for attr in attributes {
                     if attr.key.0 == "Name" && attr.value != "Project" {
@@ -233,18 +233,13 @@ impl EV3FileBuilder {
             "FrontPanel" => {}
             "BlockDiagram" => {
                 for attr in attributes {
-                    if attr.key.0 == "Name" && attr.value != "__RootDiagram__" {
-                        bail!("Unknown block diagram name value {}", attr.value);
-                    }
-
-                    if attr.key.0 != "Name" {
-                        bail!("Unknown block diagram name {}", attr.key.0);
-                    }
+                    ensure!(attr.key.0 == "Name", "Unknown block diagram attribute {}", attr.key.0);
+                    ensure!(attr.value == "__RootDiagram__", "Unknown block diagram name value {}", attr.value);
                 }
             }
             "StartBlock" => {
-                if prefix.is_some() {
-                    bail!("Unexpected prefix namespace in `StartBlock` start tag");
+                if let Some(prefix) = prefix {
+                    bail!("Unexpected prefix namespace `{prefix}` in `StartBlock` start tag");
                 }
                 let mut id = None;
                 let mut width = None;
@@ -306,8 +301,8 @@ impl EV3FileBuilder {
     }
 
     fn parse_end_tag(&mut self, name: String, prefix: Option<String>) -> anyhow::Result<()> {
-        if prefix.is_some() {
-            bail!("Prefix present in {name} end tag");
+        if let Some(prefix) = prefix {
+            bail!("Prefix `{prefix}` present in `{name}` end tag");
         }
         match name.as_str() {
             // Same as line 186
