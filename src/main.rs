@@ -69,7 +69,7 @@ impl EV3Project {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default, Debug)]
 struct Version {
     number: String,
     namespace: String,
@@ -250,8 +250,16 @@ impl EV3FileBuilder {
             "FrontPanel" => {}
             "BlockDiagram" => {
                 for attr in attributes {
-                    ensure!(attr.key.0 == "Name", "Unknown block diagram attribute {}", attr.key.0);
-                    ensure!(attr.value == "__RootDiagram__", "Unknown block diagram name value {}", attr.value);
+                    ensure!(
+                        attr.key.0 == "Name",
+                        "Unknown block diagram attribute {}",
+                        attr.key.0
+                    );
+                    ensure!(
+                        attr.value == "__RootDiagram__",
+                        "Unknown block diagram name value {}",
+                        attr.value
+                    );
                 }
             }
             "StartBlock" => {
@@ -355,7 +363,11 @@ impl EV3FileBuilder {
 
     fn version(&mut self, version: Version) -> anyhow::Result<()> {
         if self.version.is_some() {
-            bail!("Setting builder version twice");
+            bail!(
+                "Setting builder version twice. Old {:?}, new {:?}",
+                self.version.clone().unwrap(),
+                version
+            );
         }
         self.version = Some(version);
         Ok(())
@@ -363,7 +375,11 @@ impl EV3FileBuilder {
 
     fn decl(&mut self, decl: BytesDecl<'static>) -> anyhow::Result<()> {
         if self.decl.is_some() {
-            bail!("Setting builder version twice");
+            bail!(
+                "Setting builder decl twice. Old {:?}, new {:?}",
+                self.decl.clone().unwrap(),
+                decl
+            );
         }
         self.decl = Some(decl);
         Ok(())
