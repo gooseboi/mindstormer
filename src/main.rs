@@ -30,7 +30,7 @@ fn dump_tag(name: String, prefix: Option<String>, attributes: Vec<ParsedAttribut
             }
         }
     }
-    println!("");
+    println!();
 }
 
 struct EV3Project {
@@ -195,7 +195,7 @@ impl EV3FileBuilder {
                     self.parse_empty_tag(name, prefix, attributes)?;
                 }
                 Event::Text(t) => {
-                    let s = t.clone().into_inner().to_mut().iter().cloned().collect();
+                    let s = t.clone().into_inner().to_mut().to_vec();
                     let s = String::from_utf8(s).unwrap();
                     println!("TODO: Text tag: {}", s);
                 }
@@ -297,7 +297,7 @@ impl EV3FileBuilder {
                 let attributes = parse_attributes(&t)
                     .context("Failed parsing start tag attributes in StartBlock")?;
                 ensure!(
-                    attributes.len() == 0,
+                    attributes.is_empty(),
                     "Unexpected attributes in StartBlock tag"
                 );
                 if let Some(prefix) = prefix {
