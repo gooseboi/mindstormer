@@ -13,8 +13,9 @@ mod utils;
 mod xml_utils;
 
 use utils::VecReadWrapper;
-use xml_utils::{extract_name_from_qname, parse_attributes, ParsedAttribute};
-type XMLReader = Reader<VecReadWrapper>;
+use xml_utils::{
+    collect_to_vec, extract_name_from_qname, parse_attributes, ParsedAttribute, XMLReader,
+};
 
 #[allow(unused)]
 fn dump_tag(name: String, prefix: Option<String>, attributes: Vec<ParsedAttribute>) {
@@ -86,7 +87,7 @@ impl EV3File {
         let wrapper = VecReadWrapper::new(contents);
         let mut xml = Reader::from_reader(wrapper);
         xml.trim_text(true);
-        let mut builder = EV3FileBuilder::from_xml(xml);
+        let mut builder = EV3FileBuilder::from_xml(xml)?;
         builder.name(name.into())?;
         builder.parse().context("Failed parsing file contents")?;
         builder.build().context("Failed building file struct")
@@ -97,8 +98,9 @@ struct EV3FileBuilder {
     decl: Option<BytesDecl<'static>>,
     version: Option<Version>,
     name: Option<String>,
-    xml: XMLReader,
     root: Option<EV3Block>,
+    events: Vec<Event<'static>>,
+    idx: usize,
 }
 
 enum SequenceBlockType {
@@ -126,32 +128,47 @@ struct EV3Block {
 }
 
 impl EV3FileBuilder {
-    fn from_xml(xml: XMLReader) -> Self {
+    fn from_xml(xml: XMLReader) -> anyhow::Result<Self> {
         let name = Default::default();
         let version = Default::default();
         let decl = Default::default();
         let root = Default::default();
-        Self {
-            xml,
+        let events = collect_to_vec(xml).context("Failed parsing XML file")?;
+        Ok(Self {
+            events,
+            idx: 0,
             name,
             version,
             decl,
             root,
-        }
+        })
     }
 
-    fn read_xml_event(&mut self) -> anyhow::Result<Event<'static>> {
-        let mut buf = vec![];
-        let event = self
-            .xml
-            .read_event_into(&mut buf)
-            .context("File had invalid xml")?;
-        Ok(event.into_owned())
+    fn next_event(&mut self) -> anyhow::Result<Event<'static>> {
+        ensure!(
+            self.events.len() > self.idx,
+            "Invalid index {} into events of length {}",
+            self.idx,
+            self.events.len()
+        );
+        let event = self.events[self.idx].clone();
+        self.idx += 1;
+        Ok(event)
+    }
+
+    fn peek_event(&self) -> anyhow::Result<Event<'static>> {
+        ensure!(
+            self.events.len() > self.idx,
+            "Invalid index {} into events of length {}",
+            self.idx,
+            self.events.len()
+        );
+        Ok(self.events[self.idx].clone())
     }
 
     fn parse(&mut self) -> anyhow::Result<()> {
         loop {
-            match self.read_xml_event()? {
+            match self.next_event()? {
                 Event::Start(t) => {
                     let qname = t.name();
                     let (name, prefix) =
@@ -178,13 +195,13 @@ impl EV3FileBuilder {
                     self.parse_empty_tag(name, prefix, attributes)?;
                 }
                 Event::Text(t) => {
-                    let s = t.into_inner().to_mut().iter().cloned().collect();
+                    let s = t.clone().into_inner().to_mut().iter().cloned().collect();
                     let s = String::from_utf8(s).unwrap();
                     println!("TODO: Text tag: {}", s);
                 }
                 Event::Comment(_) => println!("Ignoring Comment"),
                 Event::CData(_) => println!("Found CData"),
-                Event::Decl(d) => self.decl(d.into_owned())?,
+                Event::Decl(d) => self.decl(d.clone().into_owned())?,
                 Event::PI(_) => println!("Found Processing"),
                 Event::DocType(_) => println!("Found DocType"),
                 Event::Eof => break,
@@ -262,7 +279,7 @@ impl EV3FileBuilder {
                 let width = width.context("Missing width for StartBlock")?;
                 let height = height.context("Missing height for StartBlock")?;
 
-                let event = self.read_xml_event()?;
+                let event = self.next_event()?;
                 let Event::Start(t) = event else {
                     bail!("Expected start tag in StartBlock");
                 };
