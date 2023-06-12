@@ -111,6 +111,7 @@ enum SequenceBlockType {
 struct SequenceBlock {
     ty: SequenceBlockType,
     bounds: (usize, usize),
+    wire_id: String,
 }
 
 enum EV3BlockType {
@@ -308,13 +309,85 @@ impl EV3FileBuilder {
                     "Unexpected tag name `{name}` in StartBlock tag"
                 );
 
+                let Event::Empty(t) = self.next_event()? else {
+                    bail!("Expected empty tag inside ConfigurableMethodTerminal in StartBlock tag");
+                };
+                // Ignore it cuz I assume it's always the same
+                let _ = t;
+
+                let Event::End(t) = self.next_event()? else {
+                    bail!("Expected end tag to end ConfigurableMethodTerminal in StartBlock tag");
+                };
+                let qname = t.name();
+                let (name, prefix) = extract_name_from_qname(qname)
+                    .context("Failed parsing start tag name in StartBlock")?;
+                if let Some(prefix) = prefix {
+                    bail!("Unexpected prefix `{prefix}` to end ConfigurableMethodTerminal tag");
+                }
+                ensure!(
+                    name == "ConfigurableMethodTerminal",
+                    "Unexpected tag name `{name}` to end ConfigurableMethodTerminal"
+                );
+
+                let Event::Empty(t) = self.next_event()? else {
+                    bail!("Expected empty tag in `StartBlock`");
+                };
+                let qname = t.name();
+                let (name, prefix) = extract_name_from_qname(qname)
+                    .context("Failed parsing start tag name in StartBlock")?;
+                let attributes = parse_attributes(&t)
+                    .context("Failed parsing start tag attributes in StartBlock")?;
+                ensure!(name == "Terminal", "Unexpected empty tag in `StartBlock`");
+                if let Some(prefix) = prefix {
+                    bail!("Unexpected prefix `{prefix}` in empty tag");
+                }
+
+                let mut bounds = None;
+                let mut wire_id = None;
+                for attr in attributes {
+                    match attr.key.0.as_str() {
+                        "Id" => ensure!(attr.value == "SequenceOut", "Unexpected Id `{}` in `StartBlock` SequenceOut", attr.value),
+                        "Direction" => ensure!(attr.value == "Output", "Unexpected Direction `{}` in `StartBlock` SequenceOut", attr.value),
+                        "Wire" => wire_id = Some(attr.value),
+                        // TODO: Should reuse this later
+                        "DataType" => ensure!(attr.value == "NationalInstruments:SourceModel:DataTypes:X3SequenceWireDataType", "Unexpected DataType `{}` in `StartBlock` SequenceOut", attr.value),
+                        // TODO: What even is this?
+                        "Hotspot" => {}
+                        "Bounds" => {
+                            let mut bounds_iter = attr.value.split(' ').map(|x| x.parse::<usize>());
+                            let bound_1 = bounds_iter.next().context("Missing first bound in `StartBlock`")?.context("Failed parsing first bound as integer")?;
+                            let bound_2 = bounds_iter.next().context("Missing second bound in `StartBlock`")?.context("Failed parsing second bound as integer")?;
+                            bounds = Some((bound_1, bound_2));
+                        }
+                            _ => bail!("Unexpected attribute `{}` for `SequenceOut` in `StartBlock`", attr.key.0),
+                    }
+                }
+
+                let bounds = bounds.context("No bounds in `StartBlock` SequenceOut")?;
+                let wire_id = wire_id.context("No wire_id in `StartBlock` SequenceOut")?;
+                let sequence_out = Some(SequenceBlock {
+                    ty: SequenceBlockType::Out,
+                    bounds,
+                    wire_id,
+                });
+                let Event::End(t) = self.next_event()? else {
+                    bail!("Expected end tag in `StartBlock`");
+                };
+                let qname = t.name();
+                let (name, prefix) = extract_name_from_qname(qname)
+                    .context("Failed parsing end tag name in StartBlock")?;
+                ensure!(name == "StartBlock", "Unexpected end tag for tag `{name}`");
+                if let Some(prefix) = prefix {
+                    bail!("Unexpected prefix `{prefix}` in end tag");
+                }
+
                 self.root = Some(EV3Block {
                     ty: EV3BlockType::Start,
                     id,
                     bounds: (width, height),
                     child: None,
                     sequence_in: None,
-                    sequence_out: bail!("sequence out unimplemented"),
+                    sequence_out,
                 });
             }
             _ => {
