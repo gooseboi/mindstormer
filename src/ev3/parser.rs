@@ -23,6 +23,7 @@ fn dump_tag(name: String, prefix: Option<String>, attributes: Vec<ParsedAttribut
     println!();
 }
 
+#[derive(Default)]
 pub struct EV3FileBuilder {
     decl: Option<BytesDecl<'static>>,
     version: Option<Version>,
@@ -59,18 +60,11 @@ pub struct EV3Block {
 
 impl EV3FileBuilder {
     pub fn from_xml(xml: XMLReader) -> anyhow::Result<Self> {
-        let name = Default::default();
-        let version = Default::default();
-        let decl = Default::default();
-        let root = Default::default();
         let events = collect_to_vec(xml).context("Failed parsing XML file")?;
         Ok(Self {
             events,
             idx: 0,
-            name,
-            version,
-            decl,
-            root,
+            ..Default::default()
         })
     }
 
