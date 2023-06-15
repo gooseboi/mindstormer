@@ -433,12 +433,13 @@ fn parse_bounds(input: String) -> anyhow::Result<(usize, usize)> {
         .map(|n| n.parse().context("Invalid number in bounds"))
         .collect();
     let vals = vals?;
-    if vals.len() > 4 {
-        bail!("Too many bounds");
-    } else if vals.len() < 4 {
-        bail!("Too little bounds");
+    let n = vals.len();
+    match n {
+        4 => {
+            let width = vals[2];
+            let height = vals[3];
+            Ok((width, height))
+        }
+        _ => bail!("Expected 4 bounds, found {n}"),
     }
-    let width = vals[2];
-    let height = vals[3];
-    Ok((width, height))
 }
