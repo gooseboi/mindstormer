@@ -121,13 +121,13 @@ impl EV3FileBuilder {
                 Event::Text(t) => {
                     let s = t.clone().into_inner().to_mut().to_vec();
                     let s = String::from_utf8(s).unwrap();
-                    println!("TODO: Text tag: {}", s);
+                    bail!("Unexpected Text tag: {}", s);
                 }
                 Event::Comment(_) => println!("Ignoring Comment"),
-                Event::CData(_) => println!("Found CData"),
+                Event::CData(_) => bail!("Unexpected CData tag"),
                 Event::Decl(d) => self.decl(d.clone().into_owned())?,
-                Event::PI(_) => println!("Found Processing"),
-                Event::DocType(_) => println!("Found DocType"),
+                Event::PI(_) => bail!("Unexpected Processing tag"),
+                Event::DocType(_) => bail!("Unexpected DocType tag"),
                 Event::Eof => break,
             }
         }
