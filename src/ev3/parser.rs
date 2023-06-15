@@ -4,8 +4,7 @@ use crate::utils::xml::{
 };
 use anyhow::{anyhow, bail, ensure, Context};
 use quick_xml::events::{BytesDecl, Event};
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::collections::HashMap;
 
 #[allow(unused)]
 fn dump_tag(name: String, prefix: Option<String>, attributes: Vec<ParsedAttribute>) {
@@ -23,15 +22,9 @@ fn dump_tag(name: String, prefix: Option<String>, attributes: Vec<ParsedAttribut
     println!();
 }
 
-#[derive(Default)]
-pub struct EV3FileBuilder {
-    decl: Option<BytesDecl<'static>>,
-    version: Option<Version>,
-    name: Option<String>,
-    root: Option<Rc<EV3Block>>,
-    curr_block: Option<Rc<EV3Block>>,
-    events: Vec<Event<'static>>,
-    idx: usize,
+struct BlockAttribute {
+    id: String,
+    value: String,
 }
 
 enum SequenceBlockType {
@@ -47,16 +40,36 @@ struct SequenceBlock {
 
 enum EV3BlockType {
     Start,
+    MotorMove,
+}
+
+impl TryFrom<String> for EV3BlockType {
+    type Error = anyhow::Error;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        use EV3BlockType::*;
+        match value.as_str() {
+            "MoveUnlimited\\.vix" => Ok(MotorMove),
+            _ => Err(anyhow!("Unexpected block type {value}")),
+        }
+    }
 }
 
 pub struct EV3Block {
     ty: EV3BlockType,
-    id: String,
     bounds: (usize, usize),
-    // TODO: Should this be children?
-    child: Option<Rc<RefCell<EV3Block>>>,
     sequence_in: Option<SequenceBlock>,
     sequence_out: Option<SequenceBlock>,
+}
+
+#[derive(Default)]
+pub struct EV3FileBuilder {
+    decl: Option<BytesDecl<'static>>,
+    version: Option<Version>,
+    name: Option<String>,
+    blocks: HashMap<String, EV3Block>,
+    events: Vec<Event<'static>>,
+    idx: usize,
 }
 
 impl EV3FileBuilder {
@@ -188,11 +201,27 @@ impl EV3FileBuilder {
                 }
             }
             "StartBlock" => {
-                self.root = Some(Rc::new(
-                    self.parse_start_block(name, prefix, attributes)
-                        .context("Failed parsing start block")?,
-                ));
-                self.curr_block = Some(self.root.clone().unwrap());
+                if let Some(prefix) = prefix {
+                    bail!("Unexpected prefix namespace `{prefix}` in `StartBlock` start tag");
+                }
+                let (id, block) = self
+                    .parse_start_block(attributes)
+                    .context("Failed parsing start block")?;
+                // Note: Don't check for duplicates here because if two start blocks are used then
+                // something bad happened
+                self.blocks.insert(id, block);
+            }
+            "ConfigurableMethodCall" => {
+                if let Some(prefix) = prefix {
+                    bail!("Unexpected prefix namespace `{prefix}` in `ConfigurableMethodCall` start tag");
+                }
+                let (id, block) = self
+                    .parse_method_call(attributes)
+                    .context("Failed parsing method call")?;
+                if let Some(_) = self.blocks.get(&id) {
+                    bail!("Multiple blocks with id `{id}` used");
+                }
+                self.blocks.insert(id, block);
             }
             _ => {
                 dump_tag(name.clone(), prefix, attributes);
@@ -204,13 +233,8 @@ impl EV3FileBuilder {
 
     fn parse_start_block(
         &mut self,
-        name: String,
-        prefix: Option<String>,
         attributes: Vec<ParsedAttribute>,
-    ) -> anyhow::Result<EV3Block> {
-        if let Some(prefix) = prefix {
-            bail!("Unexpected prefix namespace `{prefix}` in `StartBlock` start tag");
-        }
+    ) -> anyhow::Result<(String, EV3Block)> {
         let mut id = None;
         let mut width = None;
         let mut height = None;
@@ -225,7 +249,7 @@ impl EV3FileBuilder {
                     width = Some(w);
                     height = Some(h);
                 }
-                _ => bail!("Unknown attribute for `{name}`: {}", attr.value),
+                _ => bail!("Unknown attribute in `StartBlock`: {}", attr.value),
             }
         }
         let id = id.context("Missing id for StartBlock")?;
@@ -340,13 +364,62 @@ impl EV3FileBuilder {
         if let Some(prefix) = prefix {
             bail!("Unexpected prefix `{prefix}` in end tag");
         }
-        Ok(EV3Block {
+        let block = EV3Block {
             ty: EV3BlockType::Start,
-            id,
             bounds: (width, height),
-            child: None,
             sequence_in: None,
             sequence_out,
+        };
+        Ok((id, block))
+    }
+
+    fn parse_method_call(
+        &mut self,
+        attributes: Vec<ParsedAttribute>,
+    ) -> anyhow::Result<(String, EV3Block)> {
+        let mut id = None;
+        let mut bounds = None;
+        let mut ty = None;
+        for attr in attributes {
+            let name = attr.key.0;
+            match name.as_str() {
+                "Id" => id = Some(attr.value),
+                "Bounds" => bounds = Some(parse_bounds(attr.value)?),
+                "Target" => {
+                    ty = Some(
+                        EV3BlockType::try_from(attr.value)
+                            .context("Failed parsing target type for `ConfigurableMethodCall`")?,
+                    )
+                }
+                _ => bail!("Unexpected attribute `{name}` in `ConfigurableMethodCall`"),
+            }
+        }
+        let id = id.context("Failed to find id for `ConfigurableMethodCall`")?;
+        let bounds = bounds.context("Failed to find bounds for `ConfigurableMethodCall`")?;
+        let ty = ty.context("Failed to find target type for `ConfigurableMethodCall`")?;
+
+        Ok(match ty {
+            EV3BlockType::Start => bail!("Parsing `Start` block type as a method call"),
+            EV3BlockType::MotorMove => (id, self.parse_motor_move(bounds)?),
+        })
+    }
+
+    fn parse_motor_move(&mut self, bounds: (usize, usize)) -> anyhow::Result<EV3Block> {
+        while let Some(BlockAttribute { id, value }) = self
+            .parse_block_attribute()
+            .context("Failed parsing block attribute")?
+        {
+            println!("Id: {id}, Value: {value}");
+        }
+
+        let (sequence_in, sequence_out) = self
+            .parse_method_sequence_blocks()
+            .context("Failed parsing sequence blocks for method")?;
+        Ok(EV3Block {
+            bounds,
+            sequence_in: None,
+            sequence_out: None,
+            ty: EV3BlockType::MotorMove,
         })
     }
 
@@ -376,6 +449,79 @@ impl EV3FileBuilder {
             _ => bail!("{name} empty tag not implemented"),
         }
         Ok(())
+    }
+
+    fn parse_block_attribute(&mut self) -> anyhow::Result<Option<BlockAttribute>> {
+        let Event::Start(t) = self.peek_event()? else {
+            return Ok(None);
+        };
+        // Skip it since it's what we want
+        self.next_event()?;
+
+        let qname = t.name();
+        let (name, prefix) = extract_name_from_qname(qname)
+            .context("Failed parsing name in ConfigurableMethodTerminal")?;
+        let mut attributes = parse_attributes(&t)
+            .context("Failed parsing attributes in ConfigurableMethodTerminal")?;
+        if let Some(prefix) = prefix {
+            bail!("Unexpected prefix `{prefix}` in ConfigurableMethodTerminal");
+        }
+        ensure!(
+            name == "ConfigurableMethodTerminal",
+            "Unexpected start tag `{name}` where ConfigurableMethodTerminal was expected"
+        );
+        ensure!(
+            attributes.len() == 1,
+            "Expected only 1 attribute in ConfigurableMethodTerminal, found {}",
+            attributes.len()
+        );
+        let value = {
+            let attr = attributes.pop().unwrap();
+            let name = attr.key.0;
+            ensure!(
+                name == "ConfiguredValue",
+                "Expected attribute ConfiguredValue, found `{name}`"
+            );
+            attr.value
+        };
+        let Event::Empty(t) = self.peek_event()? else {
+            bail!("Expected empty tag after ConfigurableMethodTerminal tag");
+        };
+        // Same thing, we already know it so skip it
+        self.next_event()?;
+
+        let qname = t.name();
+        let (name, prefix) = extract_name_from_qname(qname)
+            .context("Failed parsing name in ConfigurableMethodTerminal")?;
+        let attributes = parse_attributes(&t)
+            .context("Failed parsing attributes in ConfigurableMethodTerminal")?;
+
+        if let Some(prefix) = prefix {
+            bail!("Unexpected prefix `{prefix}` in ConfigurableMethodTerminal");
+        }
+        ensure!(
+            name == "Terminal",
+            "Expected `Terminal` empty tag, found `{name}`"
+        );
+        let mut id = None;
+        for attr in attributes {
+            let name = attr.key.0;
+            match name.as_str() {
+                "Id" => id = Some(attr.value),
+                "Direction" | "DataType" | "Hotspot" | "Bounds" => {}
+                _ => bail!("Unexpected attribute `{name}` in Terminal"),
+            }
+        }
+        let id = id.context("Failed to find id in Terminal")?;
+        let Event::End(_) = self.next_event()? else {
+            bail!("Expected ConfigurableMethodTerminal end tag, found other");
+        };
+
+        Ok(Some(BlockAttribute { id, value }))
+    }
+
+    fn parse_method_sequence_blocks(&mut self) -> anyhow::Result<(SequenceBlock, SequenceBlock)> {
+        todo!()
     }
 
     pub fn name(&mut self, name: String) -> anyhow::Result<()> {
@@ -414,13 +560,11 @@ impl EV3FileBuilder {
         let name = self.name.context("No name found")?;
         let version = self.version.context("No version found")?;
         let decl = self.decl.context("No decl found")?;
-        let root = Rc::try_unwrap(self.root.context("No root found")?)
-            .map_err(|_| anyhow!("Duplicate pointers to root node"))?;
         Ok(EV3File {
             name,
             version,
             decl,
-            root,
+            blocks: self.blocks,
         })
     }
 }

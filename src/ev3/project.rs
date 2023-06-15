@@ -1,10 +1,10 @@
+use super::parser::{EV3Block, EV3FileBuilder};
 use crate::utils::VecReadWrapper;
 use anyhow::{bail, Context};
 use quick_xml::{events::BytesDecl, reader::Reader};
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
-
-use super::parser::{EV3Block, EV3FileBuilder};
 
 #[derive(Clone, Default, Debug)]
 pub struct Version {
@@ -16,7 +16,7 @@ pub struct EV3File {
     pub decl: BytesDecl<'static>,
     pub version: Version,
     pub name: String,
-    pub root: EV3Block,
+    pub blocks: HashMap<String, EV3Block>,
 }
 
 impl EV3File {
@@ -61,7 +61,7 @@ impl EV3Project {
             let _ = &f.version.number;
             let _ = &f.version.namespace;
             let _ = &f.name;
-            let _ = &f.root;
+            let _ = &f.blocks;
         }
         bail!("Outputting the project not yet implemented")
     }
