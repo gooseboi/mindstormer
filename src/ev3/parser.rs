@@ -2,7 +2,7 @@ use super::project::{EV3File, Version};
 use crate::utils::xml::{
     collect_to_vec, extract_name_from_qname, parse_attributes, ParsedAttribute, XMLReader,
 };
-use anyhow::{bail, ensure, Context};
+use anyhow::{anyhow, bail, ensure, Context};
 use quick_xml::events::{BytesDecl, Event};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -28,7 +28,8 @@ pub struct EV3FileBuilder {
     decl: Option<BytesDecl<'static>>,
     version: Option<Version>,
     name: Option<String>,
-    root: Option<EV3Block>,
+    root: Option<Rc<EV3Block>>,
+    curr_block: Option<Rc<EV3Block>>,
     events: Vec<Event<'static>>,
     idx: usize,
 }
@@ -187,9 +188,11 @@ impl EV3FileBuilder {
                 }
             }
             "StartBlock" => {
-                let block = self
-                    .parse_start_block(name, prefix, attributes)
-                    .context("Failed parsing start block");
+                self.root = Some(Rc::new(
+                    self.parse_start_block(name, prefix, attributes)
+                        .context("Failed parsing start block")?,
+                ));
+                self.curr_block = Some(self.root.clone().unwrap());
             }
             _ => {
                 dump_tag(name.clone(), prefix, attributes);
@@ -411,7 +414,8 @@ impl EV3FileBuilder {
         let name = self.name.context("No name found")?;
         let version = self.version.context("No version found")?;
         let decl = self.decl.context("No decl found")?;
-        let root = self.root.context("No root found")?;
+        let root = Rc::try_unwrap(self.root.context("No root found")?)
+            .map_err(|_| anyhow!("Duplicate pointers to root node"))?;
         Ok(EV3File {
             name,
             version,
