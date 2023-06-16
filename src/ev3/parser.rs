@@ -349,7 +349,6 @@ impl FileBuilder {
         }
 
         let bounds = bounds.context("No bounds in `StartBlock` SequenceOut")?;
-        let wire_id = Some(wire_id.context("No wire_id in `StartBlock` SequenceOut")?);
         let sequence_out = Some(SequenceBlock {
             ty: SequenceBlockType::Out,
             bounds,
