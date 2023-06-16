@@ -22,24 +22,33 @@ fn dump_tag(name: String, prefix: Option<String>, attributes: Vec<ParsedAttribut
     println!();
 }
 
-#[derive(PartialEq, Eq, Hash, Debug)]
+#[derive(PartialEq, Eq, Hash)]
 pub struct Id(String);
+
+impl std::fmt::Debug for Id {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(fmt, "Id({})", self.0)
+    }
+}
 
 struct BlockAttribute {
     id: String,
     value: String,
 }
 
+#[derive(Debug)]
 enum SequenceBlockType {
     In,
     Out,
 }
 
+#[derive(Debug)]
 struct SequenceBlock {
     ty: SequenceBlockType,
     wire_id: Option<Id>,
 }
 
+#[derive(Debug)]
 enum BlockType {
     Start,
     MotorMove {
@@ -49,12 +58,14 @@ enum BlockType {
     },
 }
 
+#[derive(Debug)]
 pub struct Block {
     ty: BlockType,
     sequence_in: Option<SequenceBlock>,
     sequence_out: Option<SequenceBlock>,
 }
 
+#[derive(Debug)]
 pub struct Wire {
     input: Id,
     output: Id,

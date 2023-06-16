@@ -12,6 +12,7 @@ pub struct Version {
     pub namespace: String,
 }
 
+#[derive(Debug)]
 pub struct File {
     pub decl: BytesDecl<'static>,
     pub version: Version,
@@ -118,7 +119,10 @@ impl Project {
 
                 _ => {
                     let name = name.as_str();
-                    files.push(File::new(name, bytes).context(format!("Failed parsing {name}"))?);
+                    let file = File::new(name, bytes).context(format!("Failed parsing {name}"))?;
+                    println!("Parsed file:");
+                    println!("{file:#?}");
+                    files.push(file);
                 }
             }
         }
