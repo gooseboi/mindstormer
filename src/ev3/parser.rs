@@ -22,7 +22,6 @@ fn dump_tag(name: String, prefix: Option<String>, attributes: Vec<ParsedAttribut
     println!();
 }
 
-pub struct Bounds(isize, isize);
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub struct Id(String);
 
@@ -38,7 +37,6 @@ enum SequenceBlockType {
 
 struct SequenceBlock {
     ty: SequenceBlockType,
-    bounds: Bounds,
     wire_id: Option<Id>,
 }
 
@@ -53,7 +51,6 @@ enum BlockType {
 
 pub struct Block {
     ty: BlockType,
-    bounds: Bounds,
     sequence_in: Option<SequenceBlock>,
     sequence_out: Option<SequenceBlock>,
 }
@@ -241,21 +238,16 @@ impl FileBuilder {
         attributes: Vec<ParsedAttribute>,
     ) -> anyhow::Result<(Id, Block)> {
         let mut id = None;
-        let mut bounds = None;
         for attr in attributes {
             match attr.key.0.as_str() {
                 "Id" => id = Some(Id(attr.value)),
                 // Ignore, because we already know it's a start block
                 "Target" => {}
-                "Bounds" => {
-                    bounds = Some(parse_bounds(attr.value)
-                        .context("Failed parsing bounds for `StartBlock`")?);
-                }
+                "Bounds" => {}
                 _ => bail!("Unknown attribute in `StartBlock`: {}", attr.value),
             }
         }
         let id = id.context("Missing id for StartBlock")?;
-        let bounds = bounds.context("Missing bounds for StartBlock")?;
 
         let event = self.next_event()?;
         let Event::Start(t) = event else {
@@ -311,7 +303,6 @@ impl FileBuilder {
             bail!("Unexpected prefix `{prefix}` in empty tag");
         }
 
-        let mut bounds_seq = None;
         let mut wire_id = None;
         for attr in attributes {
             match attr.key.0.as_str() {
@@ -335,12 +326,7 @@ impl FileBuilder {
                 ),
                 // TODO: What even is this?
                 "Hotspot" => {}
-                "Bounds" => {
-                    bounds_seq = Some(
-                        parse_bounds(attr.value)
-                            .context("Failed parsing bounds in `StartBlock` SequenceOut")?,
-                    );
-                }
+                "Bounds" => {}
                 _ => bail!(
                     "Unexpected attribute `{}` for `SequenceOut` in `StartBlock`",
                     attr.key.0
@@ -348,10 +334,8 @@ impl FileBuilder {
             }
         }
 
-        let bounds_seq = bounds_seq.context("No bounds in `StartBlock` SequenceOut")?;
         let sequence_out = Some(SequenceBlock {
             ty: SequenceBlockType::Out,
-            bounds: bounds_seq,
             wire_id,
         });
         let Event::End(t) = self.next_event()? else {
@@ -366,7 +350,6 @@ impl FileBuilder {
         }
         let block = Block {
             ty: BlockType::Start,
-            bounds,
             sequence_in: None,
             sequence_out,
         };
@@ -378,23 +361,21 @@ impl FileBuilder {
         attributes: Vec<ParsedAttribute>,
     ) -> anyhow::Result<(Id, Block)> {
         let mut id = None;
-        let mut bounds = None;
         let mut ty = None;
         for attr in attributes {
             let name = attr.key.0;
             match name.as_str() {
                 "Id" => id = Some(Id(attr.value)),
-                "Bounds" => bounds = Some(parse_bounds(attr.value)?),
+                "Bounds" => {}
                 "Target" => ty = Some(attr.value),
                 _ => bail!("Unexpected attribute `{name}` in `ConfigurableMethodCall`"),
             }
         }
         let id = id.context("Failed to find id for `ConfigurableMethodCall`")?;
-        let bounds = bounds.context("Failed to find bounds for `ConfigurableMethodCall`")?;
         let ty = ty.context("Failed to find target type for `ConfigurableMethodCall`")?;
 
         let res = Ok(match ty.as_str() {
-            "MoveUnlimited\\.vix" => (id, self.parse_motor_move(bounds)?),
+            "MoveUnlimited\\.vix" => (id, self.parse_motor_move()?),
             _ => bail!("Unknown call type {ty}"),
         });
         let Event::End(t) = self.next_event()? else {
@@ -414,7 +395,7 @@ impl FileBuilder {
         res
     }
 
-    fn parse_motor_move(&mut self, bounds: Bounds) -> anyhow::Result<Block> {
+    fn parse_motor_move(&mut self) -> anyhow::Result<Block> {
         let mut ports = None;
         let mut steering = None;
         let mut speed = None;
@@ -461,7 +442,6 @@ impl FileBuilder {
         let sequence_in = Some(sequence_in);
         let sequence_out = Some(sequence_out);
         Ok(Block {
-            bounds,
             sequence_in,
             sequence_out,
             ty: BlockType::MotorMove {
@@ -602,7 +582,6 @@ impl FileBuilder {
             "Expected tag name Terminal, found `{name}`"
         );
         let mut wire_id = None;
-        let mut bounds = None;
         for attr in attributes {
             let name = attr.key.0;
             match name.as_str() {
@@ -623,21 +602,13 @@ impl FileBuilder {
                     "Expected `Input` direction, found `{}`",
                     attr.value
                 ),
-                "Hotspot" => {}
-                "Bounds" => {
-                    bounds = Some(
-                        parse_bounds(attr.value)
-                            .context("Failed parsing bounds for sequence block")?,
-                    )
-                }
+                "Hotspot" | "Bounds" => {}
                 _ => bail!("Unexpected sequence attribute: {name}"),
             }
         }
-        let bounds = bounds.context("Failed finding bounds")?;
         let sequence_in = SequenceBlock {
             ty: SequenceBlockType::In,
             wire_id,
-            bounds,
         };
 
         let Event::Empty(t) = self.next_event()? else {
@@ -656,7 +627,6 @@ impl FileBuilder {
             "Expected tag name Terminal, found `{name}`"
         );
         let mut wire_id = None;
-        let mut bounds = None;
         for attr in attributes {
             let name = attr.key.0;
             match name.as_str() {
@@ -677,29 +647,18 @@ impl FileBuilder {
                     "Expected `Input` direction, found `{}`",
                     attr.value
                 ),
-                "Hotspot" => {}
-                "Bounds" => {
-                    bounds = Some(
-                        parse_bounds(attr.value)
-                            .context("Failed parsing bounds for sequence block")?,
-                    )
-                }
+                "Hotspot" | "Bounds" => {}
                 _ => bail!("Unexpected sequence attribute: {name}"),
             }
         }
-        let bounds = bounds.context("Failed finding bounds")?;
         let sequence_out = SequenceBlock {
             ty: SequenceBlockType::Out,
             wire_id,
-            bounds,
         };
         Ok((sequence_in, sequence_out))
     }
 
-    fn parse_wire_tag(
-        &mut self,
-        attributes: Vec<ParsedAttribute>,
-    ) -> anyhow::Result<(Id, Wire)> {
+    fn parse_wire_tag(&mut self, attributes: Vec<ParsedAttribute>) -> anyhow::Result<(Id, Wire)> {
         let mut id = None;
         let mut seq_out = None;
         let mut seq_in = None;
@@ -799,22 +758,5 @@ impl FileBuilder {
             blocks: self.blocks,
             wires: self.wires,
         })
-    }
-}
-
-fn parse_bounds(input: String) -> anyhow::Result<Bounds> {
-    let vals: anyhow::Result<Vec<isize>> = input
-        .split(' ')
-        .map(|n| n.parse().context(format!("Invalid number {n} in bounds")))
-        .collect();
-    let vals = vals?;
-    let n = vals.len();
-    match n {
-        4 => {
-            let width = vals[2];
-            let height = vals[3];
-            Ok(Bounds(width, height))
-        }
-        _ => bail!("Expected 4 bounds, found {n}"),
     }
 }

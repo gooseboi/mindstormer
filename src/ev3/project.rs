@@ -1,4 +1,4 @@
-use super::parser::{Block, FileBuilder, Wire, Id};
+use super::parser::{Block, FileBuilder, Id, Wire};
 use crate::utils::VecReadWrapper;
 use anyhow::{bail, Context};
 use quick_xml::{events::BytesDecl, reader::Reader};
