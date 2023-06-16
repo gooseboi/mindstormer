@@ -1,4 +1,4 @@
-use super::parser::{Block, FileBuilder, Wire};
+use super::parser::{Block, FileBuilder, Wire, Id};
 use crate::utils::VecReadWrapper;
 use anyhow::{bail, Context};
 use quick_xml::{events::BytesDecl, reader::Reader};
@@ -16,8 +16,8 @@ pub struct File {
     pub decl: BytesDecl<'static>,
     pub version: Version,
     pub name: String,
-    pub blocks: HashMap<String, Block>,
-    pub wires: HashMap<String, Wire>,
+    pub blocks: HashMap<Id, Block>,
+    pub wires: HashMap<Id, Wire>,
 }
 
 impl File {

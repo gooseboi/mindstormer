@@ -22,6 +22,10 @@ fn dump_tag(name: String, prefix: Option<String>, attributes: Vec<ParsedAttribut
     println!();
 }
 
+pub struct Bounds(isize, isize);
+#[derive(PartialEq, Eq, Hash, Debug)]
+pub struct Id(String);
+
 struct BlockAttribute {
     id: String,
     value: String,
@@ -34,8 +38,8 @@ enum SequenceBlockType {
 
 struct SequenceBlock {
     ty: SequenceBlockType,
-    bounds: (usize, usize),
-    wire_id: Option<String>,
+    bounds: Bounds,
+    wire_id: Option<Id>,
 }
 
 enum BlockType {
@@ -49,14 +53,14 @@ enum BlockType {
 
 pub struct Block {
     ty: BlockType,
-    bounds: (usize, usize),
+    bounds: Bounds,
     sequence_in: Option<SequenceBlock>,
     sequence_out: Option<SequenceBlock>,
 }
 
 pub struct Wire {
-    input: String,
-    output: String,
+    input: Id,
+    output: Id,
 }
 
 #[derive(Default)]
@@ -64,8 +68,8 @@ pub struct FileBuilder {
     decl: Option<BytesDecl<'static>>,
     version: Option<Version>,
     name: Option<String>,
-    blocks: HashMap<String, Block>,
-    wires: HashMap<String, Wire>,
+    blocks: HashMap<Id, Block>,
+    wires: HashMap<Id, Wire>,
     events: Vec<Event<'static>>,
     idx: usize,
 }
@@ -217,7 +221,7 @@ impl FileBuilder {
                     .parse_method_call(attributes)
                     .context("Failed parsing method call")?;
                 if let Some(_) = self.blocks.get(&id) {
-                    bail!("Multiple blocks with id `{id}` used");
+                    bail!("Multiple blocks with id `{id:?}` used");
                 }
                 self.blocks.insert(id, block);
             }
@@ -235,27 +239,23 @@ impl FileBuilder {
     fn parse_start_block(
         &mut self,
         attributes: Vec<ParsedAttribute>,
-    ) -> anyhow::Result<(String, Block)> {
+    ) -> anyhow::Result<(Id, Block)> {
         let mut id = None;
-        let mut width = None;
-        let mut height = None;
+        let mut bounds = None;
         for attr in attributes {
             match attr.key.0.as_str() {
-                "Id" => id = Some(attr.value),
+                "Id" => id = Some(Id(attr.value)),
                 // Ignore, because we already know it's a start block
                 "Target" => {}
                 "Bounds" => {
-                    let (w, h) = parse_bounds(attr.value)
-                        .context("Failed parsing bounds for `StartBlock`")?;
-                    width = Some(w);
-                    height = Some(h);
+                    bounds = Some(parse_bounds(attr.value)
+                        .context("Failed parsing bounds for `StartBlock`")?);
                 }
                 _ => bail!("Unknown attribute in `StartBlock`: {}", attr.value),
             }
         }
         let id = id.context("Missing id for StartBlock")?;
-        let width = width.context("Missing width for StartBlock")?;
-        let height = height.context("Missing height for StartBlock")?;
+        let bounds = bounds.context("Missing bounds for StartBlock")?;
 
         let event = self.next_event()?;
         let Event::Start(t) = event else {
@@ -311,7 +311,7 @@ impl FileBuilder {
             bail!("Unexpected prefix `{prefix}` in empty tag");
         }
 
-        let mut bounds = None;
+        let mut bounds_seq = None;
         let mut wire_id = None;
         for attr in attributes {
             match attr.key.0.as_str() {
@@ -325,7 +325,7 @@ impl FileBuilder {
                     "Unexpected Direction `{}` in `StartBlock` SequenceOut",
                     attr.value
                 ),
-                "Wire" => wire_id = Some(attr.value),
+                "Wire" => wire_id = Some(Id(attr.value)),
                 // TODO: Should reuse this later
                 "DataType" => ensure!(
                     attr.value
@@ -336,7 +336,7 @@ impl FileBuilder {
                 // TODO: What even is this?
                 "Hotspot" => {}
                 "Bounds" => {
-                    bounds = Some(
+                    bounds_seq = Some(
                         parse_bounds(attr.value)
                             .context("Failed parsing bounds in `StartBlock` SequenceOut")?,
                     );
@@ -348,10 +348,10 @@ impl FileBuilder {
             }
         }
 
-        let bounds = bounds.context("No bounds in `StartBlock` SequenceOut")?;
+        let bounds_seq = bounds_seq.context("No bounds in `StartBlock` SequenceOut")?;
         let sequence_out = Some(SequenceBlock {
             ty: SequenceBlockType::Out,
-            bounds,
+            bounds: bounds_seq,
             wire_id,
         });
         let Event::End(t) = self.next_event()? else {
@@ -366,7 +366,7 @@ impl FileBuilder {
         }
         let block = Block {
             ty: BlockType::Start,
-            bounds: (width, height),
+            bounds,
             sequence_in: None,
             sequence_out,
         };
@@ -376,14 +376,14 @@ impl FileBuilder {
     fn parse_method_call(
         &mut self,
         attributes: Vec<ParsedAttribute>,
-    ) -> anyhow::Result<(String, Block)> {
+    ) -> anyhow::Result<(Id, Block)> {
         let mut id = None;
         let mut bounds = None;
         let mut ty = None;
         for attr in attributes {
             let name = attr.key.0;
             match name.as_str() {
-                "Id" => id = Some(attr.value),
+                "Id" => id = Some(Id(attr.value)),
                 "Bounds" => bounds = Some(parse_bounds(attr.value)?),
                 "Target" => ty = Some(attr.value),
                 _ => bail!("Unexpected attribute `{name}` in `ConfigurableMethodCall`"),
@@ -414,7 +414,7 @@ impl FileBuilder {
         res
     }
 
-    fn parse_motor_move(&mut self, bounds: (usize, usize)) -> anyhow::Result<Block> {
+    fn parse_motor_move(&mut self, bounds: Bounds) -> anyhow::Result<Block> {
         let mut ports = None;
         let mut steering = None;
         let mut speed = None;
@@ -472,7 +472,7 @@ impl FileBuilder {
         })
     }
 
-    fn parse_end_tag(&mut self, name: String, prefix: Option<String>) -> anyhow::Result<()> {
+    fn parse_end_tag(&mut self, name: String, _prefix: Option<String>) -> anyhow::Result<()> {
         match name.as_str() {
             // Same as line 186
             "FrontPanel" | "BlockDiagram" => {}
@@ -507,7 +507,7 @@ impl FileBuilder {
                     .parse_wire_tag(attributes)
                     .context("Parsing wire tag failed")?;
                 if let Some(_) = self.wires.get(&id) {
-                    bail!("Found duplicate wire ids {id}");
+                    bail!("Found duplicate wire ids {id:?}");
                 }
                 self.wires.insert(id, wire);
             }
@@ -616,7 +616,7 @@ impl FileBuilder {
                     "Expected `Input` direction, found `{}`",
                     attr.value
                 ),
-                "Wire" => wire_id = Some(attr.value),
+                "Wire" => wire_id = Some(Id(attr.value)),
                 "DataType" => ensure!(
                     attr.value
                         == "NationalInstruments:SourceModel:DataTypes:X3SequenceWireDataType",
@@ -670,7 +670,7 @@ impl FileBuilder {
                     "Expected `Output` direction, found `{}`",
                     attr.value
                 ),
-                "Wire" => wire_id = Some(attr.value),
+                "Wire" => wire_id = Some(Id(attr.value)),
                 "DataType" => ensure!(
                     attr.value
                         == "NationalInstruments:SourceModel:DataTypes:X3SequenceWireDataType",
@@ -699,14 +699,14 @@ impl FileBuilder {
     fn parse_wire_tag(
         &mut self,
         attributes: Vec<ParsedAttribute>,
-    ) -> anyhow::Result<(String, Wire)> {
+    ) -> anyhow::Result<(Id, Wire)> {
         let mut id = None;
         let mut seq_out = None;
         let mut seq_in = None;
         for attr in attributes {
             let name = attr.key.0.as_str();
             match name {
-                "Id" => id = Some(attr.value),
+                "Id" => id = Some(Id(attr.value)),
                 "Joints" => {
                     let s = self
                         .parse_joints(attr.value)
@@ -721,8 +721,8 @@ impl FileBuilder {
         let seq_out = seq_out.context("Failed finding output")?;
         let id = id.context("Failed finding id")?;
         let wire = Wire {
-            input: seq_in,
-            output: seq_out,
+            input: Id(seq_in),
+            output: Id(seq_out),
         };
         Ok((id, wire))
     }
@@ -802,10 +802,10 @@ impl FileBuilder {
     }
 }
 
-fn parse_bounds(input: String) -> anyhow::Result<(usize, usize)> {
-    let vals: anyhow::Result<Vec<usize>> = input
+fn parse_bounds(input: String) -> anyhow::Result<Bounds> {
+    let vals: anyhow::Result<Vec<isize>> = input
         .split(' ')
-        .map(|n| n.parse().context("Invalid number in bounds"))
+        .map(|n| n.parse().context(format!("Invalid number {n} in bounds")))
         .collect();
     let vals = vals?;
     let n = vals.len();
@@ -813,7 +813,7 @@ fn parse_bounds(input: String) -> anyhow::Result<(usize, usize)> {
         4 => {
             let width = vals[2];
             let height = vals[3];
-            Ok((width, height))
+            Ok(Bounds(width, height))
         }
         _ => bail!("Expected 4 bounds, found {n}"),
     }
