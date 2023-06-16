@@ -58,6 +58,7 @@ pub mod xml {
                 .context("File had invalid xml")?
                 .into_owned();
             if let Event::Eof = event {
+                result.push(Event::Eof);
                 break Ok(result);
             } else {
                 result.push(event);
