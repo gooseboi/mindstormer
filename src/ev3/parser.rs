@@ -2,7 +2,7 @@ use super::project::{EV3File, Version};
 use crate::utils::xml::{
     collect_to_vec, extract_name_from_qname, parse_attributes, ParsedAttribute, XMLReader,
 };
-use anyhow::{anyhow, bail, ensure, Context};
+use anyhow::{bail, ensure, Context};
 use quick_xml::events::{BytesDecl, Event};
 use std::collections::HashMap;
 
@@ -35,24 +35,16 @@ enum SequenceBlockType {
 struct SequenceBlock {
     ty: SequenceBlockType,
     bounds: (usize, usize),
-    wire_id: String,
+    wire_id: Option<String>,
 }
 
 enum EV3BlockType {
     Start,
-    MotorMove,
-}
-
-impl TryFrom<String> for EV3BlockType {
-    type Error = anyhow::Error;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        use EV3BlockType::*;
-        match value.as_str() {
-            "MoveUnlimited\\.vix" => Ok(MotorMove),
-            _ => Err(anyhow!("Unexpected block type {value}")),
-        }
-    }
+    MotorMove {
+        ports: (char, char),
+        steering: isize,
+        speed: usize,
+    },
 }
 
 pub struct EV3Block {
@@ -348,7 +340,7 @@ impl EV3FileBuilder {
         }
 
         let bounds = bounds.context("No bounds in `StartBlock` SequenceOut")?;
-        let wire_id = wire_id.context("No wire_id in `StartBlock` SequenceOut")?;
+        let wire_id = Some(wire_id.context("No wire_id in `StartBlock` SequenceOut")?);
         let sequence_out = Some(SequenceBlock {
             ty: SequenceBlockType::Out,
             bounds,
@@ -385,12 +377,7 @@ impl EV3FileBuilder {
             match name.as_str() {
                 "Id" => id = Some(attr.value),
                 "Bounds" => bounds = Some(parse_bounds(attr.value)?),
-                "Target" => {
-                    ty = Some(
-                        EV3BlockType::try_from(attr.value)
-                            .context("Failed parsing target type for `ConfigurableMethodCall`")?,
-                    )
-                }
+                "Target" => ty = Some(attr.value),
                 _ => bail!("Unexpected attribute `{name}` in `ConfigurableMethodCall`"),
             }
         }
@@ -398,28 +385,79 @@ impl EV3FileBuilder {
         let bounds = bounds.context("Failed to find bounds for `ConfigurableMethodCall`")?;
         let ty = ty.context("Failed to find target type for `ConfigurableMethodCall`")?;
 
-        Ok(match ty {
-            EV3BlockType::Start => bail!("Parsing `Start` block type as a method call"),
-            EV3BlockType::MotorMove => (id, self.parse_motor_move(bounds)?),
-        })
+        let res = Ok(match ty.as_str() {
+            "MoveUnlimited\\.vix" => (id, self.parse_motor_move(bounds)?),
+            _ => bail!("Unknown call type {ty}"),
+        });
+        let Event::End(t) = self.next_event()? else {
+            bail!("Expected end tag");
+        };
+        let qname = t.name();
+        let (name, prefix) = extract_name_from_qname(qname)
+            .context("Failed parsing name in ConfigurableMethodTerminal")?;
+        if let Some(prefix) = prefix {
+            bail!("Unexpected prefix `{prefix}` in ConfigurableMethodTerminal");
+        }
+        ensure!(name == "ConfigurableMethodCall", "Expected end tag for ConfigurableMethodCall, found `{name}`");
+
+        res
     }
 
     fn parse_motor_move(&mut self, bounds: (usize, usize)) -> anyhow::Result<EV3Block> {
+        let mut ports = None;
+        let mut steering = None;
+        let mut speed = None;
         while let Some(BlockAttribute { id, value }) = self
             .parse_block_attribute()
             .context("Failed parsing block attribute")?
         {
-            println!("Id: {id}, Value: {value}");
+            match id.as_str() {
+                "Ports" => {
+                    let mut iter = value.chars();
+                    iter.next();
+                    iter.next();
+                    let p1 = iter.next().context("Expected first port")?;
+                    iter.next();
+                    let p2 = iter.next().context("Expected second port")?;
+                    ports = Some((p1, p2));
+                }
+                "Steering" => {
+                    steering = Some(
+                        value
+                            .parse()
+                            .context("Failed parsing steering value as number")?,
+                    )
+                }
+                "Speed" => {
+                    speed = Some(
+                        value
+                            .parse()
+                            .context("Failed parsing speed value as number")?,
+                    )
+                }
+                // Ignore cuz it's presumably always the same
+                "InterruptsToListenFor_16B03592_CD76_4D58_8DC3_E3C3091E327A" => {}
+                _ => bail!("Unexpected block attribute `{id}` for MotorMove"),
+            }
         }
+        let ports = ports.context("Failed finding ports for MotorMove")?;
+        let steering = steering.context("Failed finding steering for MotorMove")?;
+        let speed = speed.context("Failed finding speed for MotorMove")?;
 
         let (sequence_in, sequence_out) = self
             .parse_method_sequence_blocks()
             .context("Failed parsing sequence blocks for method")?;
+        let sequence_in = Some(sequence_in);
+        let sequence_out = Some(sequence_out);
         Ok(EV3Block {
             bounds,
-            sequence_in: None,
-            sequence_out: None,
-            ty: EV3BlockType::MotorMove,
+            sequence_in,
+            sequence_out,
+            ty: EV3BlockType::MotorMove {
+                steering,
+                ports,
+                speed,
+            },
         })
     }
 
@@ -521,7 +559,114 @@ impl EV3FileBuilder {
     }
 
     fn parse_method_sequence_blocks(&mut self) -> anyhow::Result<(SequenceBlock, SequenceBlock)> {
-        todo!()
+        let Event::Empty(t) = self.next_event()? else {
+            bail!("Expected empty tag for parsing sequence block");
+        };
+
+        let qname = t.name();
+        let (name, prefix) =
+            extract_name_from_qname(qname).context("Failed parsing empty tag name")?;
+        let attributes = parse_attributes(&t).context("Failed parsing empty tag attributes")?;
+        if let Some(prefix) = prefix {
+            bail!("Unexpected prefix namespace {prefix} in `ConfigurableMethodCall` sequence tag");
+        }
+        ensure!(
+            name == "Terminal",
+            "Expected tag name Terminal, found `{name}`"
+        );
+        let mut wire_id = None;
+        let mut bounds = None;
+        for attr in attributes {
+            let name = attr.key.0;
+            match name.as_str() {
+                "Id" => ensure!(
+                    attr.value == "SequenceIn",
+                    "Expected `SequenceIn` id, found `{}`",
+                    attr.value
+                ),
+                "Direction" => ensure!(
+                    attr.value == "Input",
+                    "Expected `Input` direction, found `{}`",
+                    attr.value
+                ),
+                "Wire" => wire_id = Some(attr.value),
+                "DataType" => ensure!(
+                    attr.value
+                        == "NationalInstruments:SourceModel:DataTypes:X3SequenceWireDataType",
+                    "Expected `Input` direction, found `{}`",
+                    attr.value
+                ),
+                "Hotspot" => {}
+                "Bounds" => {
+                    bounds = Some(
+                        parse_bounds(attr.value)
+                            .context("Failed parsing bounds for sequence block")?,
+                    )
+                }
+                _ => bail!("Unexpected sequence attribute: {name}"),
+            }
+        }
+        let bounds = bounds.context("Failed finding bounds")?;
+        let sequence_in = SequenceBlock {
+            ty: SequenceBlockType::In,
+            wire_id,
+            bounds,
+        };
+
+        let Event::Empty(t) = self.next_event()? else {
+            bail!("Expected empty tag for parsing sequence block");
+        };
+
+        let qname = t.name();
+        let (name, prefix) =
+            extract_name_from_qname(qname).context("Failed parsing empty tag name")?;
+        let attributes = parse_attributes(&t).context("Failed parsing empty tag attributes")?;
+        if let Some(prefix) = prefix {
+            bail!("Unexpected prefix namespace {prefix} in `ConfigurableMethodCall` sequence tag");
+        }
+        ensure!(
+            name == "Terminal",
+            "Expected tag name Terminal, found `{name}`"
+        );
+        let mut wire_id = None;
+        let mut bounds = None;
+        for attr in attributes {
+            let name = attr.key.0;
+            match name.as_str() {
+                "Id" => ensure!(
+                    attr.value == "SequenceOut",
+                    "Expected `SequenceOut` id, found `{}`",
+                    attr.value
+                ),
+                "Direction" => ensure!(
+                    attr.value == "Output",
+                    "Expected `Output` direction, found `{}`",
+                    attr.value
+                ),
+                "Wire" => wire_id = Some(attr.value),
+                "DataType" => ensure!(
+                    attr.value
+                        == "NationalInstruments:SourceModel:DataTypes:X3SequenceWireDataType",
+                    "Expected `Input` direction, found `{}`",
+                    attr.value
+                ),
+                "Hotspot" => {}
+                "Bounds" => {
+                    bounds = Some(
+                        parse_bounds(attr.value)
+                            .context("Failed parsing bounds for sequence block")?,
+                    )
+                }
+                _ => bail!("Unexpected sequence attribute: {name}"),
+            }
+        }
+        let bounds = bounds.context("Failed finding bounds")?;
+        let sequence_out = SequenceBlock {
+            ty: SequenceBlockType::Out,
+            wire_id,
+            bounds,
+        };
+        Ok((sequence_in, sequence_out))
     }
 
     pub fn name(&mut self, name: String) -> anyhow::Result<()> {
