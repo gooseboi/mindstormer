@@ -221,6 +221,9 @@ impl FileBuilder {
                 }
                 self.blocks.insert(id, block);
             }
+            // I think it's safe to ignore these, as they don't really affect the program and
+            // aren't changeable inside the software, so we can just reproduce them later.
+            "Icon" | "IconPanel" | "AnimationProperties.Animations" | "EventProperties.Events" => {}
             _ => {
                 dump_tag(name.clone(), prefix, attributes);
                 bail!("{name} start tag not implemented");
@@ -471,12 +474,17 @@ impl FileBuilder {
     }
 
     fn parse_end_tag(&mut self, name: String, prefix: Option<String>) -> anyhow::Result<()> {
-        if let Some(prefix) = prefix {
-            bail!("Prefix `{prefix}` present in `{name}` end tag");
-        }
         match name.as_str() {
             // Same as line 186
-            "FrontPanel" => {}
+            "FrontPanel" | "BlockDiagram" => {}
+            // These are also safe to ignore, like the start tags
+            "AnimationProperties.Animations"
+            | "EventProperties.Events"
+            | "IconPanel"
+            | "Icon"
+            | "VirtualInstrument"
+            | "Namespace"
+            | "SourceFile" => {}
             _ => bail!("{name} end tag not implemented"),
         }
         Ok(())
@@ -493,6 +501,8 @@ impl FileBuilder {
         match name.as_str() {
             // TODO: Should this do something?
             "FrontPanelCanvas" => {}
+            // These are hopefully safe to ignore
+            "AnimationsContainer" | "EventContainer" => {}
             "Wire" => {
                 let (id, wire) = self
                     .parse_wire_tag(attributes)
@@ -699,9 +709,11 @@ impl FileBuilder {
             match name {
                 "Id" => id = Some(attr.value),
                 "Joints" => {
-                    let s = self.parse_joints(attr.value).context("Failed parsing joints")?;
-                    seq_out = Some(s.0);
-                    seq_in = Some(s.1);
+                    let s = self
+                        .parse_joints(attr.value)
+                        .context("Failed parsing joints")?;
+                    seq_in = Some(s.0);
+                    seq_out = Some(s.1);
                 }
                 _ => bail!("Unexpected attribute {name} in wire"),
             }
@@ -731,10 +743,18 @@ impl FileBuilder {
                 let idx_paren = s.find(')').unwrap();
                 (s.get(1..idx).unwrap(), s.get((idx + 1)..idx_paren).unwrap())
             });
-        for i in iter {
-            println!("{i:?}");
+        let mut seq_in = None;
+        let mut seq_out = None;
+        for (id, val) in iter {
+            match val {
+                "SequenceOut" => seq_out = Some(id),
+                "SequenceIn" => seq_in = Some(id),
+                _ => bail!("Unexpected value for joint: {val}"),
+            }
         }
-        todo!()
+        let seq_in = seq_in.context("Expected input joint")?.to_owned();
+        let seq_out = seq_out.context("Expected output joint")?.to_owned();
+        Ok((seq_in, seq_out))
     }
 
     pub fn name(&mut self, name: String) -> anyhow::Result<()> {
