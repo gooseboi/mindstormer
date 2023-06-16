@@ -54,12 +54,18 @@ pub struct Block {
     sequence_out: Option<SequenceBlock>,
 }
 
+pub struct Wire {
+    input: String,
+    output: String,
+}
+
 #[derive(Default)]
 pub struct FileBuilder {
     decl: Option<BytesDecl<'static>>,
     version: Option<Version>,
     name: Option<String>,
     blocks: HashMap<String, Block>,
+    wires: HashMap<String, Wire>,
     events: Vec<Event<'static>>,
     idx: usize,
 }
@@ -398,7 +404,10 @@ impl FileBuilder {
         if let Some(prefix) = prefix {
             bail!("Unexpected prefix `{prefix}` in ConfigurableMethodTerminal");
         }
-        ensure!(name == "ConfigurableMethodCall", "Expected end tag for ConfigurableMethodCall, found `{name}`");
+        ensure!(
+            name == "ConfigurableMethodCall",
+            "Expected end tag for ConfigurableMethodCall, found `{name}`"
+        );
 
         res
     }
@@ -484,6 +493,15 @@ impl FileBuilder {
         match name.as_str() {
             // TODO: Should this do something?
             "FrontPanelCanvas" => {}
+            "Wire" => {
+                let (id, wire) = self
+                    .parse_wire_tag(attributes)
+                    .context("Parsing wire tag failed")?;
+                if let Some(_) = self.wires.get(&id) {
+                    bail!("Found duplicate wire ids {id}");
+                }
+                self.wires.insert(id, wire);
+            }
             _ => bail!("{name} empty tag not implemented"),
         }
         Ok(())
@@ -669,6 +687,56 @@ impl FileBuilder {
         Ok((sequence_in, sequence_out))
     }
 
+    fn parse_wire_tag(
+        &mut self,
+        attributes: Vec<ParsedAttribute>,
+    ) -> anyhow::Result<(String, Wire)> {
+        let mut id = None;
+        let mut seq_out = None;
+        let mut seq_in = None;
+        for attr in attributes {
+            let name = attr.key.0.as_str();
+            match name {
+                "Id" => id = Some(attr.value),
+                "Joints" => {
+                    let s = self.parse_joints(attr.value).context("Failed parsing joints")?;
+                    seq_out = Some(s.0);
+                    seq_in = Some(s.1);
+                }
+                _ => bail!("Unexpected attribute {name} in wire"),
+            }
+        }
+        let seq_in = seq_in.context("Failed finding input")?;
+        let seq_out = seq_out.context("Failed finding output")?;
+        let id = id.context("Failed finding id")?;
+        let wire = Wire {
+            input: seq_in,
+            output: seq_out,
+        };
+        Ok((id, wire))
+    }
+
+    fn parse_joints(&mut self, val: String) -> anyhow::Result<(String, String)> {
+        let iter = val
+            .split(' ')
+            // "N(n1:sequenceout)" => ("N", "(n1:sequenceout)")
+            .map(|s| (s.get(0..1).unwrap(), s.get(1..).unwrap()))
+            // I assume the ones holding "N" are the ones which have sequences,
+            // and the others, like h or w, have the other joints
+            .filter(|(c, _)| *c == "N")
+            // "(n1:sequenceout)" => ("n1", "sequenceout")
+            // TODO: Propagate error instead of panicking
+            .map(|(_, s)| {
+                let idx = s.find(':').unwrap();
+                let idx_paren = s.find(')').unwrap();
+                (s.get(1..idx).unwrap(), s.get((idx + 1)..idx_paren).unwrap())
+            });
+        for i in iter {
+            println!("{i:?}");
+        }
+        todo!()
+    }
+
     pub fn name(&mut self, name: String) -> anyhow::Result<()> {
         if self.name.is_some() {
             bail!("Setting builder name twice");
@@ -710,6 +778,7 @@ impl FileBuilder {
             version,
             decl,
             blocks: self.blocks,
+            wires: self.wires,
         })
     }
 }

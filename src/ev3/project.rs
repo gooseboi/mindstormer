@@ -1,4 +1,4 @@
-use super::parser::{Block, FileBuilder};
+use super::parser::{Block, FileBuilder, Wire};
 use crate::utils::VecReadWrapper;
 use anyhow::{bail, Context};
 use quick_xml::{events::BytesDecl, reader::Reader};
@@ -17,6 +17,7 @@ pub struct File {
     pub version: Version,
     pub name: String,
     pub blocks: HashMap<String, Block>,
+    pub wires: HashMap<String, Wire>,
 }
 
 impl File {
@@ -117,8 +118,7 @@ impl Project {
 
                 _ => {
                     let name = name.as_str();
-                    files
-                        .push(File::new(name, bytes).context(format!("Failed parsing {name}"))?);
+                    files.push(File::new(name, bytes).context(format!("Failed parsing {name}"))?);
                 }
             }
         }
