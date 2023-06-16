@@ -1,4 +1,4 @@
-use super::project::{EV3File, Version};
+use super::project::{File, Version};
 use crate::utils::xml::{
     collect_to_vec, extract_name_from_qname, parse_attributes, ParsedAttribute, XMLReader,
 };
@@ -38,7 +38,7 @@ struct SequenceBlock {
     wire_id: Option<String>,
 }
 
-enum EV3BlockType {
+enum BlockType {
     Start,
     MotorMove {
         ports: (char, char),
@@ -47,24 +47,24 @@ enum EV3BlockType {
     },
 }
 
-pub struct EV3Block {
-    ty: EV3BlockType,
+pub struct Block {
+    ty: BlockType,
     bounds: (usize, usize),
     sequence_in: Option<SequenceBlock>,
     sequence_out: Option<SequenceBlock>,
 }
 
 #[derive(Default)]
-pub struct EV3FileBuilder {
+pub struct FileBuilder {
     decl: Option<BytesDecl<'static>>,
     version: Option<Version>,
     name: Option<String>,
-    blocks: HashMap<String, EV3Block>,
+    blocks: HashMap<String, Block>,
     events: Vec<Event<'static>>,
     idx: usize,
 }
 
-impl EV3FileBuilder {
+impl FileBuilder {
     pub fn from_xml(xml: XMLReader) -> anyhow::Result<Self> {
         let events = collect_to_vec(xml).context("Failed parsing XML file")?;
         Ok(Self {
@@ -226,7 +226,7 @@ impl EV3FileBuilder {
     fn parse_start_block(
         &mut self,
         attributes: Vec<ParsedAttribute>,
-    ) -> anyhow::Result<(String, EV3Block)> {
+    ) -> anyhow::Result<(String, Block)> {
         let mut id = None;
         let mut width = None;
         let mut height = None;
@@ -356,8 +356,8 @@ impl EV3FileBuilder {
         if let Some(prefix) = prefix {
             bail!("Unexpected prefix `{prefix}` in end tag");
         }
-        let block = EV3Block {
-            ty: EV3BlockType::Start,
+        let block = Block {
+            ty: BlockType::Start,
             bounds: (width, height),
             sequence_in: None,
             sequence_out,
@@ -368,7 +368,7 @@ impl EV3FileBuilder {
     fn parse_method_call(
         &mut self,
         attributes: Vec<ParsedAttribute>,
-    ) -> anyhow::Result<(String, EV3Block)> {
+    ) -> anyhow::Result<(String, Block)> {
         let mut id = None;
         let mut bounds = None;
         let mut ty = None;
@@ -403,7 +403,7 @@ impl EV3FileBuilder {
         res
     }
 
-    fn parse_motor_move(&mut self, bounds: (usize, usize)) -> anyhow::Result<EV3Block> {
+    fn parse_motor_move(&mut self, bounds: (usize, usize)) -> anyhow::Result<Block> {
         let mut ports = None;
         let mut steering = None;
         let mut speed = None;
@@ -449,11 +449,11 @@ impl EV3FileBuilder {
             .context("Failed parsing sequence blocks for method")?;
         let sequence_in = Some(sequence_in);
         let sequence_out = Some(sequence_out);
-        Ok(EV3Block {
+        Ok(Block {
             bounds,
             sequence_in,
             sequence_out,
-            ty: EV3BlockType::MotorMove {
+            ty: BlockType::MotorMove {
                 steering,
                 ports,
                 speed,
@@ -701,11 +701,11 @@ impl EV3FileBuilder {
         Ok(())
     }
 
-    pub fn build(self) -> anyhow::Result<EV3File> {
+    pub fn build(self) -> anyhow::Result<File> {
         let name = self.name.context("No name found")?;
         let version = self.version.context("No version found")?;
         let decl = self.decl.context("No decl found")?;
-        Ok(EV3File {
+        Ok(File {
             name,
             version,
             decl,

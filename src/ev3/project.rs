@@ -1,9 +1,9 @@
-use super::parser::{EV3Block, EV3FileBuilder};
+use super::parser::{Block, FileBuilder};
 use crate::utils::VecReadWrapper;
 use anyhow::{bail, Context};
 use quick_xml::{events::BytesDecl, reader::Reader};
 use std::collections::HashMap;
-use std::fs::File;
+use std::fs;
 use std::io::Read;
 
 #[derive(Clone, Default, Debug)]
@@ -12,26 +12,26 @@ pub struct Version {
     pub namespace: String,
 }
 
-pub struct EV3File {
+pub struct File {
     pub decl: BytesDecl<'static>,
     pub version: Version,
     pub name: String,
-    pub blocks: HashMap<String, EV3Block>,
+    pub blocks: HashMap<String, Block>,
 }
 
-impl EV3File {
+impl File {
     fn new(name: &str, contents: Vec<u8>) -> anyhow::Result<Self> {
         let wrapper = VecReadWrapper::new(contents);
         let mut xml = Reader::from_reader(wrapper);
         xml.trim_text(true);
-        let mut builder = EV3FileBuilder::from_xml(xml)?;
+        let mut builder = FileBuilder::from_xml(xml)?;
         builder.name(name.into())?;
         builder.parse().context("Failed parsing file contents")?;
         builder.build().context("Failed building file struct")
     }
 }
 
-pub struct EV3Project {
+pub struct Project {
     title: String,
     description: String,
     year: usize,
@@ -43,10 +43,10 @@ pub struct EV3Project {
     activity_assets: Vec<u8>,
     /// I assume there's no need to parse this, we don't change it
     project: String,
-    files: Vec<EV3File>,
+    files: Vec<File>,
 }
 
-impl EV3Project {
+impl Project {
     pub fn output_file(&self, fname: &str) -> anyhow::Result<()> {
         let _ = fname;
         let _ = &self.title;
@@ -66,7 +66,7 @@ impl EV3Project {
         bail!("Outputting the project not yet implemented")
     }
     pub fn get_project_from_zip(filename: &str) -> anyhow::Result<Self> {
-        let file = File::open(filename)?;
+        let file = fs::File::open(filename)?;
         let mut zip = zip::ZipArchive::new(file).context("Failed to read zip file")?;
 
         let mut title = None;
@@ -118,7 +118,7 @@ impl EV3Project {
                 _ => {
                     let name = name.as_str();
                     files
-                        .push(EV3File::new(name, bytes).context(format!("Failed parsing {name}"))?);
+                        .push(File::new(name, bytes).context(format!("Failed parsing {name}"))?);
                 }
             }
         }
